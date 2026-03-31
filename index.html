@@ -6,15 +6,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
-<<<<<<< Updated upstream
-        body {
-            margin: 0;
-            overflow: hidden;
-            background-color: #110800;
-        }
-=======
         body { margin: 0; overflow: hidden; background-color: #110800; }
->>>>>>> Stashed changes
     </style>
 </head>
 
@@ -42,17 +34,6 @@
         let camera, scene, renderer, raycaster;
         let controller1, controller2;
         let controllerGrip1, controllerGrip2;
-<<<<<<< Updated upstream
-        let cameraRig; // Parent object we move for locomotion
-
-        // Movement
-        const moveSpeed = 2.0;
-        const snapAngle = Math.PI / 4; // 45 degrees
-        let canSnapLeft = true;
-        let canSnapRight = true;
-
-        // WASD keys for desktop testing
-=======
         let cameraRig;
 
         const moveSpeed = 2.0;
@@ -60,25 +41,10 @@
         let canSnapLeft = true;
         let canSnapRight = true;
 
->>>>>>> Stashed changes
         const keys = {};
         window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
         window.addEventListener('keyup',   e => keys[e.key.toLowerCase()] = false);
 
-<<<<<<< Updated upstream
-        // Game state
-        let gamePhase = 'corridor'; // 'corridor' | 'tomb'
-        let scarab = null;
-        let pedestal = null;
-        let pedestalSinking = false;
-        let grabbableObjects = [];
-        const intersected = [];
-
-        // Tomb room group
-        let tombRoom = null;
-
-        // Torch model cache
-=======
         // Game state — starts directly in tomb now
         let gamePhase = 'tomb';
         let grabbableObjects = [];
@@ -121,7 +87,6 @@
         const leverObjects = [];
 
         // Torch model
->>>>>>> Stashed changes
         let torchTemplate = null;
         const pendingTorchPlacements = [];
         const loader = new GLTFLoader();
@@ -129,27 +94,6 @@
         loader.load('Assets/Models/torch/scene.gltf', (gltf) => {
             torchTemplate = gltf.scene;
             torchTemplate.scale.set(0.5, 0.5, 0.5);
-<<<<<<< Updated upstream
-
-            torchTemplate.traverse((child) => {
-                if (!child.isMesh) return;
-                const matName = child.material.name.toLowerCase();
-                if (matName === 'flames') {
-                    // Hide the sprite sheet plane — we use our own flame sphere
-                    child.visible = false;
-                } else {
-                    // Torch body — no emissive blowout
-                    child.material.emissiveIntensity = 0.05;
-                }
-            });
-
-            pendingTorchPlacements.forEach(p => placeTorch(p.parent, p.x, p.y, p.z, p.lightIntensity));
-            pendingTorchPlacements.length = 0;
-            console.log('Torch model loaded successfully');
-        }, undefined, (err) => {
-            console.error('Torch failed:', err);
-        });
-=======
             torchTemplate.traverse((child) => {
                 if (!child.isMesh) return;
                 if (child.material.name.toLowerCase() === 'flames') {
@@ -161,7 +105,6 @@
             pendingTorchPlacements.forEach(p => placeTorch(p.parent, p.x, p.y, p.z, p.lightIntensity));
             pendingTorchPlacements.length = 0;
         }, undefined, (err) => console.error('Torch failed:', err));
->>>>>>> Stashed changes
 
         init();
 
@@ -169,16 +112,6 @@
         // INIT
         // -------------------------------------------------------------------
         function init() {
-<<<<<<< Updated upstream
-
-            scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x110800);
-            scene.fog = new THREE.Fog(0x110800, 5, 20);
-
-            // Camera Rig — move this for locomotion
-            cameraRig = new THREE.Group();
-            cameraRig.position.set(0, 0, 4); // Start at corridor entrance
-=======
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x110800);
             scene.fog = new THREE.Fog(0x110800, 8, 28);
@@ -186,31 +119,21 @@
             // Start player INSIDE the tomb room facing the stations
             cameraRig = new THREE.Group();
             cameraRig.position.set(0, 0, -10); // inside tomb, near entrance
->>>>>>> Stashed changes
             scene.add(cameraRig);
 
             camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 50);
             camera.position.set(0, 1.6, 0);
             cameraRig.add(camera);
 
-<<<<<<< Updated upstream
-            // Dim ambient — torches carry the scene
-=======
->>>>>>> Stashed changes
             scene.add(new THREE.AmbientLight(0x3D1F00, 0.4));
 
             buildCorridor();
             buildTombRoom();
-<<<<<<< Updated upstream
-
-            // --- RENDERER ---
-=======
             buildStation1();
             buildStation2();
             buildStation3();
             buildLever();
 
->>>>>>> Stashed changes
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
@@ -221,10 +144,6 @@
             document.body.appendChild(renderer.domElement);
             document.body.appendChild(VRButton.createButton(renderer));
 
-<<<<<<< Updated upstream
-            // --- CONTROLLERS (added to cameraRig so they move with player) ---
-=======
->>>>>>> Stashed changes
             raycaster = new THREE.Raycaster();
 
             controller1 = renderer.xr.getController(0);
@@ -238,10 +157,6 @@
             cameraRig.add(controller2);
 
             const factory = new XRControllerModelFactory();
-<<<<<<< Updated upstream
-
-=======
->>>>>>> Stashed changes
             controllerGrip1 = renderer.xr.getControllerGrip(0);
             controllerGrip1.add(factory.createControllerModel(controllerGrip1));
             cameraRig.add(controllerGrip1);
@@ -250,10 +165,6 @@
             controllerGrip2.add(factory.createControllerModel(controllerGrip2));
             cameraRig.add(controllerGrip2);
 
-<<<<<<< Updated upstream
-            // Laser pointer lines
-=======
->>>>>>> Stashed changes
             const lineGeo = new THREE.BufferGeometry().setFromPoints([
                 new THREE.Vector3(0, 0, 0),
                 new THREE.Vector3(0, 0, -1)
@@ -268,73 +179,6 @@
         }
 
         // -------------------------------------------------------------------
-<<<<<<< Updated upstream
-        // BUILD CORRIDOR
-        // Dark reddish tunnel. Torches only light source.
-        // Golden scarab glows at the far end on a pedestal.
-        // -------------------------------------------------------------------
-        function buildCorridor() {
-
-            const stoneMat = new THREE.MeshStandardMaterial({ color: 0x6B3A1F, roughness: 1.0 });
-            const darkMat  = new THREE.MeshStandardMaterial({ color: 0x3D1F08, roughness: 1.0 });
-
-            // Floor
-            addBox(0, -0.1, -2, 4, 0.2, 14, darkMat);
-            // Ceiling
-            addBox(0, 3.6, -2, 4, 0.2, 14, darkMat);
-            // Left wall
-            addBox(-2, 1.75, -2, 0.2, 3.5, 14, stoneMat);
-            // Right wall
-            addBox(2, 1.75, -2, 0.2, 3.5, 14, stoneMat);
-
-            // Torch pairs along corridor
-            [
-                { x: -1.8, z:  2 },
-                { x:  1.8, z:  2 },
-                { x: -1.8, z: -1 },
-                { x:  1.8, z: -1 },
-                { x: -1.8, z: -4 },
-                { x:  1.8, z: -4 },
-            ].forEach(p => spawnTorch(scene, p.x, 2.0, p.z));
-
-            // Pedestal
-            const pedestalMat = new THREE.MeshStandardMaterial({ color: 0x5C3D1E, roughness: 0.8 });
-            pedestal = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.0, 0.5), pedestalMat);
-            pedestal.position.set(0, 0.5, -8);
-            scene.add(pedestal);
-
-            // Golden Scarab (placeholder box — Blender model replaces this later)
-            const scarabMat = new THREE.MeshStandardMaterial({
-                color: 0xFFD700,
-                roughness: 0.2,
-                metalness: 0.9,
-                emissive: new THREE.Color(0xFFAA00),
-                emissiveIntensity: 0.4
-            });
-            scarab = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.15, 0.3), scarabMat);
-            scarab.position.set(0, 1.15, -8);
-            scarab.name = 'scarab';
-            scene.add(scarab);
-            grabbableObjects.push(scarab);
-
-            // Glow above scarab to draw the player's eye
-            const glow = new THREE.PointLight(0xFFCC00, 2, 3);
-            glow.position.set(0, 1.6, -8);
-            scene.add(glow);
-        }
-
-        // -------------------------------------------------------------------
-        // BUILD TOMB ROOM
-        // Bigger room beyond the corridor. Starts hidden.
-        // 3 puzzle platforms: left, center-back, right.
-        // Only puzzle 1 lights up when phase 2 starts.
-        // -------------------------------------------------------------------
-        function buildTombRoom() {
-
-            tombRoom = new THREE.Group();
-            scene.add(tombRoom);
-
-=======
         // BUILD CORRIDOR — kept as atmosphere, player walks through it
         // -------------------------------------------------------------------
         function buildCorridor() {
@@ -357,77 +201,11 @@
         // BUILD TOMB ROOM — your teammate's room, now always visible
         // -------------------------------------------------------------------
         function buildTombRoom() {
->>>>>>> Stashed changes
             const stoneMat = new THREE.MeshStandardMaterial({ color: 0x9C8A6E, roughness: 0.9 });
             const wallMat  = new THREE.MeshStandardMaterial({ color: 0x8B7355, roughness: 0.9 });
             const darkMat  = new THREE.MeshStandardMaterial({ color: 0x4A3A2A, roughness: 1.0 });
 
             // Floor & Ceiling
-<<<<<<< Updated upstream
-            addBoxTo(tombRoom,  0, -0.1, -17,  16, 0.2, 16, stoneMat);
-            addBoxTo(tombRoom,  0,  4.6, -17,  16, 0.2, 16, darkMat);
-
-            // Walls
-            addBoxTo(tombRoom,  0, 2.3, -25, 16, 4.7, 0.3, wallMat); // back
-            addBoxTo(tombRoom, -8, 2.3, -17, 0.3, 4.7, 16, wallMat); // left
-            addBoxTo(tombRoom,  8, 2.3, -17, 0.3, 4.7, 16, wallMat); // right
-
-            // Connector wall between corridor and tomb (with opening)
-            addBoxTo(tombRoom, -3.5, 2.3, -9, 5.5, 4.7, 0.3, wallMat);
-            addBoxTo(tombRoom,  3.5, 2.3, -9, 5.5, 4.7, 0.3, wallMat);
-            // Top of doorway
-            addBoxTo(tombRoom,  0, 3.8, -9, 3, 1.5, 0.3, wallMat);
-
-            // --- PUZZLE PLATFORMS ---
-
-            // Puzzle 1 — Broken Tablet (LEFT)
-            const p1Platform = addBoxTo(tombRoom, -5, 0.05, -17, 4, 0.1, 4, 
-                new THREE.MeshStandardMaterial({ color: 0x6B5A3E, roughness: 0.9 }));
-
-            // Puzzle 1 torches (start visible, will light up in phase 2)
-            spawnTorchTo(tombRoom, -6.5, 2, -15, true);
-            spawnTorchTo(tombRoom, -3.5, 2, -15, true);
-
-            // Puzzle 1 light (starts OFF)
-            const p1Light = new THREE.PointLight(0xff5500, 0, 8);
-            p1Light.name = 'puzzle1Light';
-            p1Light.position.set(-5, 3, -17);
-            tombRoom.add(p1Light);
-
-            // Puzzle 2 — Scale (CENTER BACK)
-            addBoxTo(tombRoom, 0, 0.05, -22, 4, 0.1, 4,
-                new THREE.MeshStandardMaterial({ color: 0x4A3A2A, roughness: 1.0 }));
-
-            // Puzzle 3 — Combo Lock (RIGHT)
-            addBoxTo(tombRoom, 5, 0.05, -17, 4, 0.1, 4,
-                new THREE.MeshStandardMaterial({ color: 0x4A3A2A, roughness: 1.0 }));
-
-            // Hide tomb room until scarab is grabbed
-            tombRoom.visible = false;
-        }
-
-        // -------------------------------------------------------------------
-        // PHASE 2 — Scarab grabbed, tomb opens
-        // -------------------------------------------------------------------
-        function triggerPhase2() {
-            gamePhase = 'tomb';
-            scarab.visible = false;
-            pedestalSinking = true;
-            tombRoom.visible = true;
-
-            // Light up Puzzle 1
-            const p1Light = tombRoom.getObjectByName('puzzle1Light');
-            if (p1Light) p1Light.intensity = 2.5;
-
-            // Remove scarab from grabbable list
-            grabbableObjects = grabbableObjects.filter(o => o.name !== 'scarab');
-
-            console.log('Phase 2 — Tomb revealed. Puzzle 1 lit.');
-        }
-
-        // -------------------------------------------------------------------
-        // CONTROLLER EVENTS
-=======
             addBox( 0, -0.1, -17, 16, 0.2, 16, stoneMat);
             addBox( 0,  4.6, -17, 16, 0.2, 16, darkMat);
 
@@ -808,133 +586,11 @@
 
         // -------------------------------------------------------------------
         // CONTROLLER SELECT START
->>>>>>> Stashed changes
         // -------------------------------------------------------------------
         function onSelectStart(event) {
             const controller = event.target;
             raycaster.setFromXRController(controller);
 
-<<<<<<< Updated upstream
-            const hits = raycaster.intersectObjects(grabbableObjects, true);
-            if (hits.length > 0) {
-                const object = hits[0].object;
-
-                if (object.name === 'scarab' && gamePhase === 'corridor') {
-                    triggerPhase2();
-                } else {
-                    // Generic grab
-                    object.material.emissive = new THREE.Color(0x0044ff);
-                    object.material.emissiveIntensity = 0.5;
-                    controller.attach(object);
-                    controller.userData.selected = object;
-                }
-            }
-        }
-
-        function onSelectEnd(event) {
-            const controller = event.target;
-            if (controller.userData.selected !== undefined) {
-                const object = controller.userData.selected;
-                object.material.emissiveIntensity = 0;
-                scene.attach(object);
-                controller.userData.selected = undefined;
-            }
-        }
-
-        // -------------------------------------------------------------------
-        // WASD MOVEMENT — desktop testing only, remove before final submission
-        // -------------------------------------------------------------------
-        function handleKeyboard() {
-            const delta = 1 / 60;
-            const speed = 3.0;
-
-            const forward = new THREE.Vector3();
-            camera.getWorldDirection(forward);
-            forward.y = 0;
-            forward.normalize();
-
-            const right = new THREE.Vector3();
-            right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
-
-            if (keys['w'] || keys['arrowup'])    cameraRig.position.addScaledVector(forward,  speed * delta);
-            if (keys['s'] || keys['arrowdown'])  cameraRig.position.addScaledVector(forward, -speed * delta);
-            if (keys['a'] || keys['arrowleft'])  cameraRig.position.addScaledVector(right,   -speed * delta);
-            if (keys['d'] || keys['arrowright']) cameraRig.position.addScaledVector(right,    speed * delta);
-
-            // Q/E to rotate view on desktop
-            if (keys['q']) cameraRig.rotation.y += 0.02;
-            if (keys['e']) cameraRig.rotation.y -= 0.02;
-
-            // F key to trigger phase 2 (for testing without grabbing)
-            if (keys['f'] && gamePhase === 'corridor') {
-                triggerPhase2();
-                keys['f'] = false; // prevent repeat
-            }
-        }
-
-        // -------------------------------------------------------------------
-        // SMOOTH LOCOMOTION
-        // Left stick = move, Right stick = snap rotate 45°
-        // -------------------------------------------------------------------
-        function handleLocomotion() {
-            const session = renderer.xr.getSession();
-            if (!session) return;
-
-            const delta = 1 / 72;
-
-            for (const source of session.inputSources) {
-                if (!source.gamepad) continue;
-                const axes = source.gamepad.axes;
-
-                if (source.handedness === 'left') {
-                    const moveX = axes[2] ?? 0;
-                    const moveZ = axes[3] ?? 0;
-
-                    if (Math.abs(moveX) > 0.1 || Math.abs(moveZ) > 0.1) {
-                        const forward = new THREE.Vector3();
-                        camera.getWorldDirection(forward);
-                        forward.y = 0;
-                        forward.normalize();
-
-                        const right = new THREE.Vector3();
-                        right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
-
-                        cameraRig.position.addScaledVector(forward, -moveZ * moveSpeed * delta);
-                        cameraRig.position.addScaledVector(right,    moveX * moveSpeed * delta);
-                    }
-                }
-
-                if (source.handedness === 'right') {
-                    const rotX = axes[2] ?? 0;
-
-                    if (rotX > 0.7 && canSnapRight) {
-                        cameraRig.rotation.y -= snapAngle;
-                        canSnapRight = false;
-                    } else if (rotX < -0.7 && canSnapLeft) {
-                        cameraRig.rotation.y += snapAngle;
-                        canSnapLeft = false;
-                    }
-                    if (Math.abs(rotX) < 0.3) {
-                        canSnapLeft = true;
-                        canSnapRight = true;
-                    }
-                }
-            }
-        }
-
-        // -------------------------------------------------------------------
-        // PEDESTAL SINK ANIMATION
-        // -------------------------------------------------------------------
-        function updatePedestal() {
-            if (!pedestalSinking) return;
-            if (pedestal.position.y > -1.5) {
-                pedestal.position.y -= 0.015;
-            } else {
-                pedestalSinking = false;
-            }
-        }
-
-=======
             // Check scroll pieces (station 1)
             if (!station1Solved) {
                 const hits = raycaster.intersectObjects(scrollPieces);
@@ -1256,18 +912,13 @@
             scene.add(winLight);
         }
 
->>>>>>> Stashed changes
         // -------------------------------------------------------------------
         // HOVER HIGHLIGHT
         // -------------------------------------------------------------------
         function updateHover() {
             while (intersected.length) {
                 const obj = intersected.pop();
-<<<<<<< Updated upstream
-                if (!obj.userData.grabbed) {
-=======
                 if (obj.material && obj.material.emissive && !obj.userData.grabbed) {
->>>>>>> Stashed changes
                     obj.material.emissive = new THREE.Color(0x000000);
                     obj.material.emissiveIntensity = 0;
                 }
@@ -1276,27 +927,17 @@
             [controller1, controller2].forEach(ctrl => {
                 if (ctrl.userData.selected) return;
                 raycaster.setFromXRController(ctrl);
-<<<<<<< Updated upstream
-                const hits = raycaster.intersectObjects(grabbableObjects, true);
-=======
                 const targets = [...scrollPieces, ...scaleObjects, ...counterButtons, ...leverObjects];
                 const hits = raycaster.intersectObjects(targets, true);
->>>>>>> Stashed changes
                 const line = ctrl.getObjectByName('line');
 
                 if (hits.length > 0) {
                     const obj = hits[0].object;
-<<<<<<< Updated upstream
-                    obj.material.emissive = new THREE.Color(0xff2200);
-                    obj.material.emissiveIntensity = 0.5;
-                    intersected.push(obj);
-=======
                     if (obj.material && obj.material.emissive) {
                         obj.material.emissive = new THREE.Color(0xff4400);
                         obj.material.emissiveIntensity = 0.5;
                         intersected.push(obj);
                     }
->>>>>>> Stashed changes
                     if (line) line.scale.z = hits[0].distance;
                 } else {
                     if (line) line.scale.z = 5;
@@ -1305,11 +946,7 @@
         }
 
         // -------------------------------------------------------------------
-<<<<<<< Updated upstream
-        // HELPERS — create geometry and add to scene or group
-=======
         // HELPERS
->>>>>>> Stashed changes
         // -------------------------------------------------------------------
         function addBox(x, y, z, w, h, d, mat) {
             const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
@@ -1325,8 +962,6 @@
             return mesh;
         }
 
-<<<<<<< Updated upstream
-=======
         function makeTextPanel(text, x, y, z, w, h) {
             const lines = text.split('\n');
             const canvas = document.createElement('canvas');
@@ -1368,7 +1003,6 @@
             );
         }
 
->>>>>>> Stashed changes
         // -------------------------------------------------------------------
         // TORCH HELPERS
         // -------------------------------------------------------------------
@@ -1379,18 +1013,10 @@
             }
             const torch = torchTemplate.clone();
             torch.position.set(x, y, z);
-<<<<<<< Updated upstream
-            if (x < 0) torch.rotation.y = Math.PI / 2;
-            if (x > 0) torch.rotation.y = -Math.PI / 2;
-            parent.add(torch);
-
-            // Custom flame sphere on top of torch head
-=======
             if (x < 0) torch.rotation.y =  Math.PI / 2;
             if (x > 0) torch.rotation.y = -Math.PI / 2;
             parent.add(torch);
 
->>>>>>> Stashed changes
             const flameMat = new THREE.MeshStandardMaterial({
                 color: 0xFF6600,
                 emissive: new THREE.Color(0xFF4400),
@@ -1400,23 +1026,11 @@
             flame.position.set(x, y + 0.3, z);
             parent.add(flame);
 
-<<<<<<< Updated upstream
-            // Point light
-=======
->>>>>>> Stashed changes
             const light = new THREE.PointLight(0xff5500, lightIntensity, 6);
             light.position.set(x, y + 0.35, z);
             parent.add(light);
         }
 
-<<<<<<< Updated upstream
-        function spawnTorch(parent, x, y, z) {
-            placeTorch(parent, x, y, z, 1.5);
-        }
-
-        function spawnTorchTo(group, x, y, z, dark = false) {
-            placeTorch(group, x, y, z, dark ? 0 : 1.5);
-=======
         function spawnTorch(parent, x, y, z) { placeTorch(parent, x, y, z, 1.5); }
         function spawnTorchTo(group, x, y, z, dark = false) { placeTorch(group, x, y, z, dark ? 0 : 1.5); }
 
@@ -1478,7 +1092,6 @@
                     if (Math.abs(rotX) < 0.3) { canSnapLeft = true; canSnapRight = true; }
                 }
             }
->>>>>>> Stashed changes
         }
 
         // -------------------------------------------------------------------
@@ -1496,19 +1109,10 @@
         function animate() {
             handleKeyboard();
             handleLocomotion();
-<<<<<<< Updated upstream
-            updatePedestal();
-=======
->>>>>>> Stashed changes
             updateHover();
             renderer.render(scene, camera);
         }
 
     </script>
 </body>
-<<<<<<< Updated upstream
-
 </html>
-=======
-</html>
->>>>>>> Stashed changes
