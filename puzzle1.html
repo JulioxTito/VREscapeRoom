@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Puzzle 1 - Broken Tablet</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #110800; }
+        #ui {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #FFD700;
+            font-family: serif;
+            font-size: 18px;
+            text-align: center;
+            pointer-events: none;
+            text-shadow: 0 0 10px #FF6600;
+        }
+    </style>
+</head>
+<body>
+
+<div id="ui">Restore the sacred tablet to escape...<br><span id="progress">0 / 6 pieces placed</span></div>
+
+<script type="importmap">
+{
+    "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.1/examples/jsm/"
+    }
+}
+</script>
+
+<script type="module">
+
+    import * as THREE from 'three';
+    import { VRButton } from 'three/addons/webxr/VRButton.js';
+    import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+    // -------------------------------------------------------------------
+    // GLOBALS
+    // -------------------------------------------------------------------
+    let camera, scene, renderer, raycaster;
+    let controller1, controller2;
+    let controllerGrip1, controllerGrip2;
+    let cameraRig;
+
+    const loader = new GLTFLoader();
+    const pieces = [];        // The 6 grabbable tablet pieces
+    const snapTargets = [];   // The 6 ghost slot positions
+    let piecesPlaced = 0;
+    let puzzleSolved = false;
+    const PIECE_TARGET_SIZE = 0.24; // Approximate max dimension in world units
+
+    // WASD
+    const keys = {};
+    window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+    window.addEventListener('keyup',   e => keys[e.key.toLowerCase()] = false);
+
+    // Snap distance threshold
+    const SNAP_DISTANCE = 0.35;
+
+    // Piece file names
+    const PIECE_FILES = [
+        'Assets/Models/Tablet/piece1.glb',
+        'Assets/Models/Tablet/piece2.glb',
+        'Assets/Models/Tablet/piece3.glb',
+        'Assets/Models/Tablet/piece4.glb',
+        'Assets/Models/Tablet/piece5.glb',
+        'Assets/Models/Tablet/piece6.glb',
+    ];
+
+    // Where each piece lives when correctly placed
+    // These are offsets around the tablet frame center (0, 1.2, -3)
+    const SNAP_POSITIONS = [
+        new THREE.Vector3(-0.35,  1.5, -3),
+        new THREE.Vector3( 0.35,  1.5, -3),
+        new THREE.Vector3(-0.35,  1.2, -3),
+        new THREE.Vector3( 0.35,  1.2, -3),
+        new THREE.Vector3(-0.35,  0.9, -3),
+        new THREE.Vector3( 0.35,  0.9, -3),
+    ];
+
+    // Where pieces start — scattered on a table
+    const START_POSITIONS = [
+        new THREE.Vector3(-0.4,  0.95, -1.5),
+        new THREE.Vector3( 0.1,  0.95, -1.5),
+        new THREE.Vector3(-0.4,  0.95, -2.0),
+        new THREE.Vector3( 0.1,  0.95, -2.0),
+        new THREE.Vector3(-0.4,  0.95, -2.5),
+        new THREE.Vector3( 0.1,  0.95, -2.5),
+    ];
+
+    init();
+
+    // -------------------------------------------------------------------
+    // INIT
+    // -------------------------------------------------------------------
+    function init() {
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x110800);
+        scene.fog = new THREE.Fog(0x110800, 5, 20);
+
+        // Camera rig
+        cameraRig = new THREE.Group();
+        cameraRig.position.set(0, 0, 1);
+        scene.add(cameraRig);
+
+        camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 50);
+        camera.position.set(0, 1.6, 0);
+        cameraRig.add(camera);
+
+        // Lighting
+        scene.add(new THREE.AmbientLight(0x3D1F00, 0.5));
+        addTorch(-1.8, 2.0,  0);
+        addTorch( 1.8, 2.0,  0);
+        addTorch(-1.8, 2.0, -3);
+        addTorch( 1.8, 2.0, -3);
+
+        // Room
+        buildRoom();
+
+        // Tablet frame (ghost outline showing where pieces go)
+        buildTabletFrame();
+
+        // Load all 6 pieces
+        loadPieces();
+
+        // Renderer
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setAnimationLoop(animate);
+        renderer.xr.enabled = true;
+        document.body.appendChild(renderer.domElement);
+        document.body.appendChild(VRButton.createButton(renderer));
+
+        // Controllers
+        raycaster = new THREE.Raycaster();
+
+        controller1 = renderer.xr.getController(0);
+        controller1.addEventListener('selectstart', onSelectStart);
+        controller1.addEventListener('selectend', onSelectEnd);
+        cameraRig.add(controller1);
+
+        controller2 = renderer.xr.getController(1);
+        controller2.addEventListener('selectstart', onSelectStart);
+        controller2.addEventListener('selectend', onSelectEnd);
+        cameraRig.add(controller2);
+
+        const factory = new XRControllerModelFactory();
+        controllerGrip1 = renderer.xr.getControllerGrip(0);
+        controllerGrip1.add(factory.createControllerModel(controllerGrip1));
+        cameraRig.add(controllerGrip1);
+
+        controllerGrip2 = renderer.xr.getControllerGrip(1);
+        controllerGrip2.add(factory.createControllerModel(controllerGrip2));
+        cameraRig.add(controllerGrip2);
+
+        // Laser lines
+        const lineGeo = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(0, 0, 0),
+            new THREE.Vector3(0, 0, -1)
+        ]);
+        const line = new THREE.Line(lineGeo);
+        line.name = 'line';
+        line.scale.z = 5;
+        controller1.add(line.clone());
+        controller2.add(line.clone());
+
+        window.addEventListener('resize', onWindowResize);
+    }
+
+    // -------------------------------------------------------------------
+    // BUILD ROOM
+    // -------------------------------------------------------------------
+    function buildRoom() {
+        const stoneMat = new THREE.MeshStandardMaterial({ color: 0x6B3A1F, roughness: 1.0 });
+        const darkMat  = new THREE.MeshStandardMaterial({ color: 0x3D1F08, roughness: 1.0 });
+
+        // Floor
+        const floor = new THREE.Mesh(new THREE.BoxGeometry(6, 0.2, 10), darkMat);
+        floor.position.set(0, -0.1, -2);
+        scene.add(floor);
+
+        // Ceiling
+        const ceiling = new THREE.Mesh(new THREE.BoxGeometry(6, 0.2, 10), darkMat);
+        ceiling.position.set(0, 3.5, -2);
+        scene.add(ceiling);
+
+        // Walls
+        const leftWall = new THREE.Mesh(new THREE.BoxGeometry(0.2, 3.5, 10), stoneMat);
+        leftWall.position.set(-3, 1.75, -2);
+        scene.add(leftWall);
+
+        const rightWall = new THREE.Mesh(new THREE.BoxGeometry(0.2, 3.5, 10), stoneMat);
+        rightWall.position.set(3, 1.75, -2);
+        scene.add(rightWall);
+
+        const backWall = new THREE.Mesh(new THREE.BoxGeometry(6, 3.5, 0.2), stoneMat);
+        backWall.position.set(0, 1.75, -7);
+        scene.add(backWall);
+
+        // Stone table to hold the pieces
+        const tableMat = new THREE.MeshStandardMaterial({ color: 0x5C3D1E, roughness: 0.9 });
+        const tableTop = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.08, 1.4), tableMat);
+        tableTop.position.set(-0.15, 0.9, -2.0);
+        scene.add(tableTop);
+
+        const legMat = new THREE.MeshStandardMaterial({ color: 0x4A2E14, roughness: 1.0 });
+        [[-0.5, -1.5], [-0.5, -2.5], [0.2, -1.5], [0.2, -2.5]].forEach(([x, z]) => {
+            const leg = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.9, 0.08), legMat);
+            leg.position.set(x, 0.45, z);
+            scene.add(leg);
+        });
+
+        // Tablet wall
+        const tabletWall = new THREE.Mesh(new THREE.BoxGeometry(6, 3.5, 0.2), stoneMat);
+        tabletWall.position.set(0, 1.75, -3.1);
+        scene.add(tabletWall);
+    }
+
+    // -------------------------------------------------------------------
+    // TABLET FRAME — glowing ghost outline showing where pieces go
+    // -------------------------------------------------------------------
+    function buildTabletFrame() {
+        // Outer frame
+        const frameMat = new THREE.MeshStandardMaterial({
+            color: 0xFFD700,
+            emissive: new THREE.Color(0xFFAA00),
+            emissiveIntensity: 0.3,
+            roughness: 0.8,
+            transparent: true,
+            opacity: 0.25,
+            side: THREE.DoubleSide
+        });
+
+        const frame = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.75, 0.02), frameMat);
+        frame.position.set(0, 1.2, -3.05);
+        scene.add(frame);
+
+        // Subtle glow light behind frame
+        const glow = new THREE.PointLight(0xFFAA00, 0.5, 2);
+        glow.position.set(0, 1.2, -2.8);
+        scene.add(glow);
+
+        // Individual snap target slots (one per piece)
+        SNAP_POSITIONS.forEach((pos, i) => {
+            const slotMat = new THREE.MeshStandardMaterial({
+                color: 0xFFD700,
+                emissive: new THREE.Color(0xFFAA00),
+                emissiveIntensity: 0.2,
+                transparent: true,
+                opacity: 0.15,
+                wireframe: true
+            });
+            const slot = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.28, 0.02), slotMat);
+            slot.position.copy(pos);
+            slot.userData.slotIndex = i;
+            scene.add(slot);
+            snapTargets.push(slot);
+        });
+    }
+
+    // -------------------------------------------------------------------
+    // LOAD PIECES
+    // -------------------------------------------------------------------
+    function loadPieces() {
+        PIECE_FILES.forEach((file, index) => {
+            loader.load(file, (gltf) => {
+                const piece = new THREE.Group();
+                const model = gltf.scene;
+
+                // Normalize each GLB to a visible, consistent size.
+                const rawBox = new THREE.Box3().setFromObject(model);
+                const rawSize = new THREE.Vector3();
+                rawBox.getSize(rawSize);
+                const maxDim = Math.max(rawSize.x, rawSize.y, rawSize.z) || 1;
+                const uniformScale = PIECE_TARGET_SIZE / maxDim;
+                model.scale.multiplyScalar(uniformScale);
+
+                // Recompute bounds after scaling, then center X/Z and place base on Y=0.
+                const scaledBox = new THREE.Box3().setFromObject(model);
+                const center = new THREE.Vector3();
+                scaledBox.getCenter(center);
+                model.position.x -= center.x;
+                model.position.z -= center.z;
+                model.position.y -= scaledBox.min.y;
+
+                piece.add(model);
+
+                // Place on table
+                piece.position.copy(START_POSITIONS[index]);
+
+                // Flat on table, slight random rotation
+                piece.rotation.x = 0;
+                piece.rotation.y = (Math.random() - 0.5) * 0.5;
+                piece.rotation.z = (Math.random() - 0.5) * 0.3;
+
+                // Tag it
+                piece.userData.isPiece = true;
+                piece.userData.pieceIndex = index;
+                piece.userData.snapped = false;
+
+                scene.add(piece);
+                pieces.push(piece);
+
+                console.log(`Loaded piece ${index + 1}`);
+            }, undefined, (err) => {
+                console.error(`Failed to load ${file}:`, err);
+            });
+        });
+    }
+
+    // -------------------------------------------------------------------
+    // CONTROLLER EVENTS
+    // -------------------------------------------------------------------
+    function onSelectStart(event) {
+        const controller = event.target;
+        raycaster.setFromXRController(controller);
+
+        // Find all meshes inside pieces
+        const meshes = [];
+        pieces.forEach(p => {
+            if (!p.userData.snapped) {
+                p.traverse(child => { if (child.isMesh) meshes.push(child); });
+            }
+        });
+
+        const hits = raycaster.intersectObjects(meshes, true);
+        if (hits.length > 0) {
+            // Find the parent piece group
+            let obj = hits[0].object;
+            while (obj.parent && !obj.userData.isPiece) obj = obj.parent;
+
+            if (obj.userData.isPiece && !obj.userData.snapped) {
+                // Highlight grabbed piece
+                obj.traverse(child => {
+                    if (child.isMesh) {
+                        child.material = child.material.clone();
+                        child.material.emissive = new THREE.Color(0x004488);
+                        child.material.emissiveIntensity = 0.5;
+                    }
+                });
+                controller.attach(obj);
+                controller.userData.selected = obj;
+            }
+        }
+    }
+
+    function onSelectEnd(event) {
+        const controller = event.target;
+        const piece = controller.userData.selected;
+        if (!piece) return;
+
+        // Detach from controller back to scene
+        scene.attach(piece);
+        controller.userData.selected = undefined;
+
+        // Remove highlight
+        piece.traverse(child => {
+            if (child.isMesh) {
+                child.material.emissiveIntensity = 0;
+            }
+        });
+
+        // Check if near a snap target
+        checkSnap(piece);
+    }
+
+    // -------------------------------------------------------------------
+    // SNAP CHECK
+    // -------------------------------------------------------------------
+    function checkSnap(piece) {
+        const piecePos = new THREE.Vector3();
+        piece.getWorldPosition(piecePos);
+
+        const targetPos = SNAP_POSITIONS[piece.userData.pieceIndex];
+        const dist = piecePos.distanceTo(targetPos);
+
+        if (dist < SNAP_DISTANCE) {
+            snapPiece(piece);
+        }
+    }
+
+    function snapPiece(piece) {
+        const index = piece.userData.pieceIndex;
+        const targetPos = SNAP_POSITIONS[index];
+
+        // Snap to exact position
+        piece.position.copy(targetPos);
+        piece.rotation.set(0, 0, 0); // upright on the wall
+        piece.userData.snapped = true;
+
+        // Flash gold on snap
+        piece.traverse(child => {
+            if (child.isMesh) {
+                child.material = child.material.clone();
+                child.material.emissive = new THREE.Color(0xFFAA00);
+                child.material.emissiveIntensity = 0.8;
+            }
+        });
+
+        // Fade emissive back down after 1 second
+        setTimeout(() => {
+            piece.traverse(child => {
+                if (child.isMesh) child.material.emissiveIntensity = 0.1;
+            });
+        }, 1000);
+
+        // Hide the slot wireframe
+        if (snapTargets[index]) snapTargets[index].visible = false;
+
+        piecesPlaced++;
+        document.getElementById('progress').textContent = `${piecesPlaced} / 6 pieces placed`;
+
+        if (piecesPlaced >= 6) onPuzzleSolved();
+    }
+
+    // -------------------------------------------------------------------
+    // PUZZLE SOLVED
+    // -------------------------------------------------------------------
+    function onPuzzleSolved() {
+        puzzleSolved = true;
+        document.getElementById('ui').innerHTML = `
+            <span style="color:#FFD700; font-size:24px;">✨ The tablet is restored! ✨</span><br>
+            <span style="font-size:16px;">The next puzzle awakens...</span>
+        `;
+
+        // Big golden flash
+        const flash = new THREE.PointLight(0xFFD700, 5, 8);
+        flash.position.set(0, 1.2, -2.8);
+        scene.add(flash);
+        setTimeout(() => scene.remove(flash), 1500);
+
+        console.log('Puzzle 1 solved!');
+    }
+
+    // -------------------------------------------------------------------
+    // TORCH HELPER
+    // -------------------------------------------------------------------
+    function addTorch(x, y, z) {
+        const mat = new THREE.MeshStandardMaterial({ color: 0x4A2800 });
+        const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.4, 6), mat);
+        handle.position.set(x, y, z);
+        scene.add(handle);
+
+        const flameMat = new THREE.MeshStandardMaterial({
+            color: 0xFF6600,
+            emissive: new THREE.Color(0xFF4400),
+            emissiveIntensity: 1.0
+        });
+        const flame = new THREE.Mesh(new THREE.SphereGeometry(0.07, 6, 6), flameMat);
+        flame.position.set(x, y + 0.25, z);
+        scene.add(flame);
+
+        const light = new THREE.PointLight(0xff5500, 1.5, 6);
+        light.position.set(x, y + 0.3, z);
+        scene.add(light);
+    }
+
+    // -------------------------------------------------------------------
+    // HOVER HIGHLIGHT
+    // -------------------------------------------------------------------
+    function updateHover() {
+        [controller1, controller2].forEach(ctrl => {
+            if (ctrl.userData.selected) return;
+            raycaster.setFromXRController(ctrl);
+
+            const meshes = [];
+            pieces.forEach(p => {
+                if (!p.userData.snapped) {
+                    p.traverse(child => { if (child.isMesh) meshes.push(child); });
+                }
+            });
+
+            const hits = raycaster.intersectObjects(meshes, true);
+            const line = ctrl.getObjectByName('line');
+            if (hits.length > 0) {
+                if (line) line.scale.z = hits[0].distance;
+            } else {
+                if (line) line.scale.z = 5;
+            }
+        });
+    }
+
+    // -------------------------------------------------------------------
+    // WASD
+    // -------------------------------------------------------------------
+    function handleKeyboard() {
+        const delta = 1 / 60;
+        const speed = 3.0;
+
+        const forward = new THREE.Vector3();
+        camera.getWorldDirection(forward);
+        forward.y = 0;
+        forward.normalize();
+
+        const right = new THREE.Vector3();
+        right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+
+        if (keys['w'] || keys['arrowup'])    cameraRig.position.addScaledVector(forward,  speed * delta);
+        if (keys['s'] || keys['arrowdown'])  cameraRig.position.addScaledVector(forward, -speed * delta);
+        if (keys['a'] || keys['arrowleft'])  cameraRig.position.addScaledVector(right,   -speed * delta);
+        if (keys['d'] || keys['arrowright']) cameraRig.position.addScaledVector(right,    speed * delta);
+        if (keys['q']) cameraRig.rotation.y += 0.02;
+        if (keys['e']) cameraRig.rotation.y -= 0.02;
+    }
+
+    // -------------------------------------------------------------------
+    // RESIZE + ANIMATE
+    // -------------------------------------------------------------------
+    function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function animate() {
+        handleKeyboard();
+        updateHover();
+        renderer.render(scene, camera);
+    }
+
+</script>
+</body>
+</html>
