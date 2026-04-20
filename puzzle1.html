@@ -30,8 +30,8 @@
 <script type="importmap">
 {
     "imports": {
-        "three": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.module.js",
-        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.1/examples/jsm/"
+        "three": "https://cdn.jsdelivr.net/npm/three@0.172.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.172.0/examples/jsm/"
     }
 }
 </script>
@@ -83,15 +83,14 @@
         new THREE.Vector3( 0.22, 1.05, -4.9),
     ];
 
-    // Pieces start on the table
-    // Table is at Z = -2, top surface at Y = 0.92
+    // Pieces start ON TOP of table — table top is at Y=1.04
     const START_POSITIONS = [
-        new THREE.Vector3(-0.35, 0.95, -1.7),
-        new THREE.Vector3( 0.05, 0.95, -1.7),
-        new THREE.Vector3(-0.35, 0.95, -2.1),
-        new THREE.Vector3( 0.05, 0.95, -2.1),
-        new THREE.Vector3(-0.35, 0.95, -2.5),
-        new THREE.Vector3( 0.05, 0.95, -2.5),
+        new THREE.Vector3(-0.25, 3, -1.5),
+        new THREE.Vector3( 0.10, 3, -1.5),
+        new THREE.Vector3(-0.25, 2.5, -1.8),
+        new THREE.Vector3( 0.10, 2.8, -1.8),
+        new THREE.Vector3(-0.25, 4, -2.1),
+        new THREE.Vector3( 0.10, 4, -2.1),
     ];
 
     init();
@@ -113,8 +112,17 @@
         camera.position.set(0, 1.6, 0);
         cameraRig.add(camera);
 
-        // Lighting
-        scene.add(new THREE.AmbientLight(0x3D1F00, 0.6));
+        // Lighting — very bright for testing
+        scene.add(new THREE.AmbientLight(0xffffff, 3.0));
+        const dl = new THREE.DirectionalLight(0xffffff, 3.0);
+        dl.position.set(0, 5, 0);
+        scene.add(dl);
+        const pl1 = new THREE.PointLight(0xffffff, 3, 15);
+        pl1.position.set(0, 3, -2);
+        scene.add(pl1);
+        const pl2 = new THREE.PointLight(0xffffff, 3, 15);
+        pl2.position.set(0, 3, -4);
+        scene.add(pl2);
         spawnTorch(-1.8, 2.0,  0.0);
         spawnTorch( 1.8, 2.0,  0.0);
         spawnTorch(-1.8, 2.0, -3.0);
@@ -198,14 +206,13 @@
         const top = new THREE.MeshStandardMaterial({ color: 0x7A5C3A, roughness: 0.8 });
         const leg = new THREE.MeshStandardMaterial({ color: 0x5C3D1E, roughness: 1.0 });
 
-        // Table top — wide enough for 2 columns of pieces
-        addBox(-0.15, 0.9, -2.1,  1.0, 0.08, 1.2, top);
-
+        // Table top
+        addBox(-0.15, 1.0, -1.8,  1.0, 0.08, 1.0, top);
         // 4 legs
-        addBox(-0.55, 0.45, -1.6,  0.08, 0.9, 0.08, leg);
-        addBox( 0.25, 0.45, -1.6,  0.08, 0.9, 0.08, leg);
-        addBox(-0.55, 0.45, -2.6,  0.08, 0.9, 0.08, leg);
-        addBox( 0.25, 0.45, -2.6,  0.08, 0.9, 0.08, leg);
+        addBox(-0.55, 0.50, -1.4,  0.08, 1.0, 0.08, leg);
+        addBox( 0.25, 0.50, -1.4,  0.08, 1.0, 0.08, leg);
+        addBox(-0.55, 0.50, -2.2,  0.08, 1.0, 0.08, leg);
+        addBox( 0.25, 0.50, -2.2,  0.08, 1.0, 0.08, leg);
     }
 
     // -------------------------------------------------------------------
@@ -257,13 +264,14 @@
                 const piece = gltf.scene;
 
                 // Scale down — pieces are very large in Blender units
-                piece.scale.set(0.06, 0.06, 0.06);
+                piece.scale.set(0.09, 0.09, 0.09);
 
                 // Position on table
                 piece.position.copy(START_POSITIONS[index]);
 
-                // Slight random tilt so they look naturally placed
-                piece.rotation.y = (Math.random() - 0.5) * 0.4;
+                // Face forward toward player, slight random Y tilt
+                piece.rotation.x = -Math.PI / 2; // lay flat facing up
+                piece.rotation.z = (Math.random() - 0.5) * 0.3;
 
                 // Tag for interaction
                 piece.userData.isPiece  = true;
