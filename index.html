@@ -11,7 +11,6 @@
 </head>
 
 <body>
-
     <script type="importmap">
         {
             "imports": {
@@ -45,7 +44,6 @@
         window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
         window.addEventListener('keyup',   e => keys[e.key.toLowerCase()] = false);
 
-        // Game state — starts directly in tomb now
         let gamePhase = 'tomb';
         let grabbableObjects = [];
         const intersected = [];
@@ -56,28 +54,27 @@
         let station3Solved = false;
 
         // Station 2 scale state
-        let leftPanMass  = 1.0; // scarab weight (fixed, shown on left)
-        let rightPanMass = 0.0; // player adds to right
+        let leftPanMass  = 1.0; 
+        let rightPanMass = 0.0; 
         let scalePanLeft  = null;
         let scalePanRight = null;
         let scaleBeamMesh = null;
-        const scaleObjects = []; // droppable weight objects
+        const scaleObjects = []; 
 
         // Station 3 glyph counter state
-        // *** CHANGE THESE to match your Python script output ***
         const ANSWER = { sun: 4, star: 6, snake: 3 };
         const playerInput = { sun: 0, star: 0, snake: 0 };
         let station3Frame = null;
-        const counterButtons = []; // raycast targets for +/- buttons
+        const counterButtons = []; 
 
         // Station 1 scroll state
         const scrollPieces = [];
         const scrollSolved = new Set();
         const scrollSnapTargets = {
-            piece_0: new THREE.Vector3(-5.25, 0.22, -16.75),
-            piece_1: new THREE.Vector3(-4.85, 0.22, -16.75),
-            piece_2: new THREE.Vector3(-5.25, 0.22, -17.25),
-            piece_3: new THREE.Vector3(-4.85, 0.22, -17.25),
+            piece_0: new THREE.Vector3(-6.25, 0.22, -11.75),
+            piece_1: new THREE.Vector3(-5.85, 0.22, -11.75),
+            piece_2: new THREE.Vector3(-6.25, 0.22, -12.25),
+            piece_3: new THREE.Vector3(-5.85, 0.22, -12.25),
         };
 
         // Lever state
@@ -89,6 +86,9 @@
         // Torch model
         let torchTemplate = null;
         const pendingTorchPlacements = [];
+        
+        // All torch point lights — animated each frame for flicker
+        const torchLights = [];
         const loader = new GLTFLoader();
 
         loader.load('Assets/Models/torch/scene.gltf', (gltf) => {
@@ -108,31 +108,37 @@
 
         init();
 
-        // -------------------------------------------------------------------
-        // INIT
-        // -------------------------------------------------------------------
         function init() {
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x110800);
-            scene.fog = new THREE.Fog(0x110800, 8, 28);
+            scene.background = new THREE.Color(0x0A0402); // changed to sky color when outside
+            
+            // Moderate fog — room stays visible but far end fades naturally
+            scene.fog = new THREE.FogExp2(0x0A0402, 0.018); // reduced — exterior needs visibility 
 
-            // Start player INSIDE the tomb room facing the stations
             cameraRig = new THREE.Group();
-            cameraRig.position.set(0, 0, -10); // inside tomb, near entrance
+            cameraRig.position.set(0, 0, -10); 
             scene.add(cameraRig);
 
-            camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 50);
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 500);
             camera.position.set(0, 1.6, 0);
             cameraRig.add(camera);
 
-            scene.add(new THREE.AmbientLight(0x3D1F00, 0.4));
+            // Warm ambient — enough to see stone surfaces clearly, torches add drama
+            scene.add(new THREE.AmbientLight(0x6B3010, 2.0)); 
+
+            // Hemisphere: warm firelight from below bouncing off stone floor, cool dark above
+            const hemi = new THREE.HemisphereLight(0x7A3208, 0x080200, 1.4);
+            scene.add(hemi);
 
             buildCorridor();
             buildTombRoom();
             buildStation1();
             buildStation2();
             buildStation3();
+            buildStation4(); 
             buildLever();
+            buildWallPaintings();
+            buildEgyptExit();
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setPixelRatio(window.devicePixelRatio);
@@ -140,6 +146,9 @@
             renderer.setAnimationLoop(animate);
             renderer.xr.enabled = true;
             renderer.shadowMap.enabled = true;
+            
+            // Enhanced shadows for contrast
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
             document.body.appendChild(renderer.domElement);
             document.body.appendChild(VRButton.createButton(renderer));
@@ -175,21 +184,48 @@
             controller1.add(line.clone());
             controller2.add(line.clone());
 
+            // Desktop mouse click — triggers lever when clicked
+            renderer.domElement.addEventListener('click', (e) => {
+                if (renderer.xr.isPresenting) return; // only in non-VR mode
+                const mouse = new THREE.Vector2(
+                    (e.clientX / window.innerWidth) * 2 - 1,
+                    -(e.clientY / window.innerHeight) * 2 + 1
+                );
+                const rc = new THREE.Raycaster();
+                rc.setFromCamera(mouse, camera);
+                const hits = rc.intersectObjects(grabbableObjects, true);
+                for (const h of hits) {
+                    let o = h.object;
+                    while (o && !o.userData.type) o = o.parent;
+                    if (o && o.userData.type === 'lever') {
+                        scene.userData.leverPulled = true;
+                        scene.userData.leverT = 0;
+                        console.log('Lever pulled via mouse click!');
+                        return;
+                    }
+                }
+            });
+
             window.addEventListener('resize', onWindowResize);
         }
 
-        // -------------------------------------------------------------------
-        // BUILD CORRIDOR — kept as atmosphere, player walks through it
-        // -------------------------------------------------------------------
         function buildCorridor() {
             const stoneMat = new THREE.MeshStandardMaterial({ color: 0x6B3A1F, roughness: 1.0 });
             const darkMat  = new THREE.MeshStandardMaterial({ color: 0x3D1F08, roughness: 1.0 });
+            const wallMat3 = new THREE.MeshStandardMaterial({ color: 0x4A2D18, roughness: 0.9 });
 
-            addBox(0, -0.1, -2, 4, 0.2, 14, darkMat);
-            addBox(0,  3.6, -2, 4, 0.2, 14, darkMat);
-            addBox(-2, 1.75, -2, 0.2, 3.5, 14, stoneMat);
-            addBox( 2, 1.75, -2, 0.2, 3.5, 14, stoneMat);
+            // Corridor box: z range [-9 to +7], width 4 (x: -2 to +2), height 3.5
+            // Floor & ceiling — extended to cover DOOR_Z area
+            addBox(0, -0.1, -1, 4, 0.2, 16, darkMat);       // floor (z:-9 to +7)
+            addBox(0,  3.6, -1, 4, 0.2, 16, darkMat);       // ceiling
+            // Side walls — FULL LENGTH to match, using stone material
+            addBox(-2, 1.75, -1, 0.2, 3.5, 16, stoneMat);   // left wall
+            addBox( 2, 1.75, -1, 0.2, 3.5, 16, stoneMat);   // right wall
 
+            // Corridor ends at z=+7.5 — door at z=+6.2 seals it when closed
+            // (no end-cap wall here; the door + stone panels in buildEgyptExit do the sealing)
+
+            // Torches
             [
                 { x: -1.8, z:  2 }, { x:  1.8, z:  2 },
                 { x: -1.8, z: -1 }, { x:  1.8, z: -1 },
@@ -197,773 +233,1087 @@
             ].forEach(p => spawnTorch(scene, p.x, 2.0, p.z));
         }
 
-        // -------------------------------------------------------------------
-        // BUILD TOMB ROOM — your teammate's room, now always visible
-        // -------------------------------------------------------------------
         function buildTombRoom() {
-            const stoneMat = new THREE.MeshStandardMaterial({ color: 0x9C8A6E, roughness: 0.9 });
-            const wallMat  = new THREE.MeshStandardMaterial({ color: 0x8B7355, roughness: 0.9 });
-            const darkMat  = new THREE.MeshStandardMaterial({ color: 0x4A3A2A, roughness: 1.0 });
+            // Stone materials — warm brownish-red like the reference
+            const floorMat   = new THREE.MeshStandardMaterial({ color: 0x3D2515, roughness: 0.95 });
+            const wallMat    = new THREE.MeshStandardMaterial({ color: 0x4A2D18, roughness: 0.9  });
+            const ceilMat    = new THREE.MeshStandardMaterial({ color: 0x150A04, roughness: 1.0  });
+            const backWallMat = new THREE.MeshStandardMaterial({ color: 0x5A3520, roughness: 0.85, emissive: 0x3A1A08, emissiveIntensity: 0.4 });
+            const exteriorMat = new THREE.MeshStandardMaterial({ color: 0x8B6020, roughness: 1.0 }); // sandstone outside
 
-            // Floor & Ceiling
-            addBox( 0, -0.1, -17, 16, 0.2, 16, stoneMat);
-            addBox( 0,  4.6, -17, 16, 0.2, 16, darkMat);
-
-            // Walls
-            addBox( 0, 2.3, -25, 16, 4.7, 0.3, wallMat); // back
-            addBox(-8, 2.3, -17, 0.3, 4.7, 16, wallMat); // left
-            addBox( 8, 2.3, -17, 0.3, 4.7, 16, wallMat); // right
-
-            // Doorway walls (opening in middle)
-            addBox(-3.5, 2.3, -9, 5.5, 4.7, 0.3, wallMat);
-            addBox( 3.5, 2.3, -9, 5.5, 4.7, 0.3, wallMat);
-            addBox(   0, 3.8, -9,   3, 1.5, 0.3, wallMat);
-
-            // Torches lighting the tomb room
-            spawnTorch(scene, -7, 2, -12);
-            spawnTorch(scene,  7, 2, -12);
-            spawnTorch(scene, -7, 2, -22);
-            spawnTorch(scene,  7, 2, -22);
-            spawnTorch(scene,  0, 2, -24);
-
-            // Station platform highlights (slightly raised coloured floors)
-            // Station 1 — LEFT
-            addBox(-5, 0.06, -17, 4, 0.05, 4,
-                new THREE.MeshStandardMaterial({ color: 0x6B5A3E, roughness: 0.9 }));
-            // Station 2 — CENTER BACK
-            addBox( 0, 0.06, -22, 4, 0.05, 4,
-                new THREE.MeshStandardMaterial({ color: 0x5A4A2E, roughness: 0.9 }));
-            // Station 3 — RIGHT
-            addBox( 5, 0.06, -17, 4, 0.05, 4,
-                new THREE.MeshStandardMaterial({ color: 0x5A4A2E, roughness: 0.9 }));
-        }
-
-        // -------------------------------------------------------------------
-        // STATION 1 — SCROLL PUZZLE (left platform at -5, 0, -17)
-        // Drag 4 papyrus pieces onto the table to assemble the clue
-        // -------------------------------------------------------------------
-        function buildStation1() {
-
-            // Stone table
-            const tableMat = new THREE.MeshStandardMaterial({ color: 0x7A6A50, roughness: 0.9 });
-            const legMat   = new THREE.MeshStandardMaterial({ color: 0x6A5A40, roughness: 1.0 });
-
-            const tableTop = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.08, 0.7), tableMat);
-            tableTop.position.set(-5, 0.84, -17);
-            scene.add(tableTop);
-
-            [[-0.5,-0.28],[-0.5,0.28],[0.5,-0.28],[0.5,0.28]].forEach(([x,z]) => {
-                const leg = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.84, 0.1), legMat);
-                leg.position.set(-5 + x, 0.42, -17 + z);
-                scene.add(leg);
+            // ── EXTERIOR: T-shape sandstone mastaba (like the sketch) ──
+            // Uses BackSide so it doesn't render over the interior
+            const sandstoneExt = new THREE.MeshStandardMaterial({
+                color: 0xC89050, roughness: 1.0, side: THREE.BackSide
             });
 
-            // Label above table
-            makeTextPanel('STATION 1\nAssemble the scroll', -5, 1.8, -17, 0.8, 0.35);
+            // Main tomb block (the wider back part): tomb interior is x±9, z:-7 to -27
+            // Make exterior slightly larger: x±11, z:-6 to -28, height 6.5
+            const tombBlock = new THREE.Mesh(
+                new THREE.BoxGeometry(22, 6.5, 22),
+                sandstoneExt
+            );
+            tombBlock.position.set(0, 3.25, -17);
+            scene.add(tombBlock);
 
-            // 4 papyrus scroll pieces scattered on the table
-            const colors = [0xD4A96A, 0xC8985E, 0xDDB87A, 0xBF8A50];
-            colors.forEach((color, i) => {
-                const geo = new THREE.PlaneGeometry(0.26, 0.18);
-                const mat = new THREE.MeshStandardMaterial({
-                    color, roughness: 0.9, side: THREE.DoubleSide
+            // Narrow corridor block sticking out in front (the vertical bar of the T-shape)
+            // Corridor interior is x±2, z:+7.5 to -7. Exterior x±3.5, z:+8 to -7.5, height 4.5
+            const corridorBlock = new THREE.Mesh(
+                new THREE.BoxGeometry(7, 4.5, 15.5),
+                sandstoneExt
+            );
+            corridorBlock.position.set(0, 2.25, 0.25);
+            scene.add(corridorBlock);
+
+            // Decorative stone blocks at the 4 corners of the tomb (solid, visible from all sides)
+            const cornerMat = new THREE.MeshStandardMaterial({color:0xA07530, roughness:1});
+            [[-11.5,-6.5],[11.5,-6.5],[-11.5,-27.5],[11.5,-27.5]].forEach(([x,z])=>{
+                for(let i=0;i<4;i++){
+                    const blk = new THREE.Mesh(new THREE.BoxGeometry(1.5,0.6,1.5), cornerMat);
+                    blk.position.set(x, 0.3+i*0.6, z);
+                    scene.add(blk);
+                }
+            });
+
+            // Floor
+            addBox( 0, -0.1, -17, 18, 0.2, 20, floorMat);
+            // Ceiling
+            addBox( 0,  5.2, -17, 18, 0.3, 20, ceilMat);
+
+            // Back wall — emissive orange centre glow
+            const backWall = new THREE.Mesh(new THREE.BoxGeometry(18, 5.6, 0.3), backWallMat);
+            backWall.position.set(0, 2.6, -27);
+            backWall.receiveShadow = true;
+            scene.add(backWall);
+
+            // Side walls
+            addBox(-9, 2.6, -17, 0.3, 5.6, 20, wallMat);
+            addBox( 9, 2.6, -17, 0.3, 5.6, 20, wallMat);
+
+            // Doorway wall — extends fully from side wall to side wall
+            // Side walls at x=±9. Opening is 3 wide centred on x=0 (from x=-1.5 to +1.5)
+            // Left doorway wall: from x=-9 to x=-1.5, width 7.5, centred at x=-5.25
+            addBox(-5.25, 2.6, -9, 7.5, 5.6, 0.3, wallMat);
+            // Right doorway wall: from x=+1.5 to x=+9, width 7.5, centred at x=+5.25
+            addBox( 5.25, 2.6, -9, 7.5, 5.6, 0.3, wallMat);
+            // Lintel above doorway
+            addBox(   0, 4.6, -9,   3, 1.5, 0.3, wallMat);
+
+            // Floor tiles
+            const groutMat = new THREE.MeshStandardMaterial({ color: 0x251508, roughness: 1.0 });
+            for (let i = -4; i <= 4; i++) addBox(i * 2, 0.0, -17, 0.06, 0.015, 20, groutMat);
+            for (let j = 0; j <= 9; j++) addBox(0, 0.0, -8 - j * 2.2, 18, 0.015, 0.06, groutMat);
+
+            // === PILLARS ===
+            // x: ±3.5 — close to centre aisle but won't clip camera at z:-10
+            const PILLAR_X = 3.5;
+            const PILLAR_Z  = [-12.0, -16.0, -20.0, -24.0];
+
+            // === PILLARS ===
+            // Build geometry pillars IMMEDIATELY (always visible, no async dependency)
+            // GLTF will replace them if it loads successfully
+            const pillarMeshGroups = [];
+            const pillarMat  = new THREE.MeshStandardMaterial({ color: 0xC8922A, roughness: 0.45, metalness: 0.72, emissive: new THREE.Color(0x6B3D08), emissiveIntensity: 0.4 });
+            const baseCapMat = new THREE.MeshStandardMaterial({ color: 0xAA7820, roughness: 0.5,  metalness: 0.65, emissive: new THREE.Color(0x4A2A04), emissiveIntensity: 0.35 });
+            const pH = 5.1;
+            PILLAR_Z.forEach(zPos => {
+                [-PILLAR_X, PILLAR_X].forEach(xPos => {
+                    const grp = new THREE.Group();
+                    grp.position.set(xPos, 0, zPos);
+
+                    const base = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.35, 1.2), baseCapMat);
+                    base.position.y = 0.17; base.receiveShadow = true; grp.add(base);
+
+                    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.44, 0.52, pH, 8), pillarMat);
+                    shaft.position.y = pH / 2 + 0.35; shaft.castShadow = true; shaft.receiveShadow = true; grp.add(shaft);
+
+                    const cap = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.4, 1.15), baseCapMat);
+                    cap.position.y = pH + 0.55; cap.receiveShadow = true; grp.add(cap);
+
+                    scene.add(grp);
+                    pillarMeshGroups.push(grp);
                 });
-                const piece = new THREE.Mesh(geo, mat);
-
-                // Scatter randomly on table surface
-                piece.position.set(
-                    -5 + (Math.random() - 0.5) * 0.8,
-                    0.90,
-                    -17 + (Math.random() - 0.5) * 0.4
-                );
-                piece.rotation.x = -Math.PI / 2;
-                piece.rotation.z = (Math.random() - 0.5) * 1.0;
-                piece.name = `piece_${i}`;
-                piece.userData.type = 'scrollPiece';
-
-                // Draw hieroglyph markings on each piece
-                const canvas = document.createElement('canvas');
-                canvas.width = 128; canvas.height = 82;
-                const ctx = canvas.getContext('2d');
-                ctx.fillStyle = ['#D4A96A','#C8985E','#DDB87A','#BF8A50'][i];
-                ctx.fillRect(0, 0, 128, 82);
-                ctx.fillStyle = '#4a2a0a';
-                ctx.font = '16px serif';
-                const syms = ['𓂀','𓆣','𓅓','𓁹','𓊪','𓏌'];
-                for (let r = 0; r < 3; r++)
-                    for (let c = 0; c < 4; c++)
-                        ctx.fillText(syms[(r+c+i)%syms.length], 8+c*30, 20+r*25);
-                // Mark which quadrant this piece represents
-                ctx.strokeStyle = '#8B4513';
-                ctx.lineWidth = 3;
-                ctx.strokeRect(2, 2, 124, 78);
-
-                mat.map = new THREE.CanvasTexture(canvas);
-                mat.needsUpdate = true;
-
-                scene.add(piece);
-                scrollPieces.push(piece);
-                grabbableObjects.push(piece);
             });
 
-            // Torch lighting for station 1
-            spawnTorch(scene, -6.5, 2, -15);
-            spawnTorch(scene, -3.5, 2, -15);
+            // Try loading GLTF — swap geometry if it succeeds
+            loader.load('Assets/Models/egyptian_pillar_v1/scene.gltf', (gltf) => {
+                // Remove geometry fallbacks
+                pillarMeshGroups.forEach(g => scene.remove(g));
+
+                const pillarModel = gltf.scene;
+                pillarModel.scale.set(0.5, 0.9, 0.5);
+
+                // FULLY REPLACE all materials with rich ancient gold
+                const goldMat = new THREE.MeshStandardMaterial({
+                    color:            0xC8922A,   // deep antique gold
+                    emissive:         new THREE.Color(0x6B3D08),
+                    emissiveIntensity: 0.4,
+                    roughness:        0.45,
+                    metalness:        0.72,
+                });
+
+                pillarModel.traverse((child) => {
+                    if (child.isMesh) {
+                        child.castShadow    = true;
+                        child.receiveShadow = true;
+                        child.material      = goldMat; // replace, don't patch
+                    }
+                });
+
+                PILLAR_Z.forEach(zPos => {
+                    const pL = pillarModel.clone(); pL.position.set(-PILLAR_X, 0, zPos); scene.add(pL);
+                    const pR = pillarModel.clone(); pR.position.set( PILLAR_X, 0, zPos); pR.rotation.y = Math.PI; scene.add(pR);
+                });
+            }, undefined, (err) => {
+                console.warn('Pillar GLTF not found, using geometry fallback:', err);
+                // Geometry pillars already in scene — nothing to do
+            });
+
+            // === TORCHES ===
+            // Front pair — visible immediately on entry
+            placeTorch(scene, -7.0, 2.2, -12.0, 6.0);
+            placeTorch(scene,  7.0, 2.2, -12.0, 6.0);
+            // Mid pair — lights the colonnade
+            placeTorch(scene, -7.0, 2.2, -18.0, 5.5);
+            placeTorch(scene,  7.0, 2.2, -18.0, 5.5);
+            // Back pair — lights far end and back wall bloom
+            placeTorch(scene, -7.0, 2.2, -24.0, 5.0);
+            placeTorch(scene,  7.0, 2.2, -24.0, 5.0);
+
+            // Back-wall bloom — warm orange concentrated glow on the far wall
+            const backGlow = new THREE.PointLight(0xBB3A08, 5.0, 20);
+            backGlow.position.set(0, 2.2, -25.5);
+            scene.add(backGlow);
+
+            // Centre ceiling fill so the aisle floor is visible
+            const aisleLight = new THREE.PointLight(0x7A3810, 2.5, 18);
+            aisleLight.position.set(0, 4.5, -16);
+            scene.add(aisleLight);
+
+            // Platform mats (where stations sit)
+            const platformMat = new THREE.MeshStandardMaterial({ color: 0x4A2E14, roughness: 0.9 });
+            addBox(-6.5, 0.05, -12, 3, 0.06, 3, platformMat);
+            addBox(-6.5, 0.05, -22, 3, 0.06, 3, platformMat);
+            addBox( 6.5, 0.05, -12, 3, 0.06, 3, platformMat);
+            addBox( 6.5, 0.05, -22, 3, 0.06, 3, platformMat);
+
+
+  // --- SPHINX ---
+loader.load('Assets/Models/egyptian_style_sphinx_statue/scene.gltf', (gltf) => {
+    const sphinxModel = gltf.scene;
+    
+    // Force a tiny scale first to normalize it
+    sphinxModel.scale.setScalar(0.01);
+    
+    // Now measure
+    const box = new THREE.Box3().setFromObject(sphinxModel);
+    const size = box.getSize(new THREE.Vector3());
+    console.log('RAW sphinx size:', size);
+    console.log('RAW sphinx min:', box.min, 'max:', box.max);
+
+    // Target: sphinx should be ~1.2m tall, ~2m long
+    const targetHeight = 1.2;
+    const scaleFactor = targetHeight / size.y;
+    sphinxModel.scale.setScalar(0.01 * scaleFactor);
+    
+    // Re-measure to get floor offset
+    const box2 = new THREE.Box3().setFromObject(sphinxModel);
+    const offsetY = -box2.min.y;
+
+    sphinxModel.traverse(child => {
+        if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; }
+    });
+
+    const sxL = sphinxModel.clone();
+    sxL.position.set(-3.0, offsetY, -13.0);
+    sxL.rotation.y = Math.PI; // face inward toward corridor entrance
+    scene.add(sxL);
+
+    const sxR = sphinxModel.clone();
+    sxR.position.set( 3.0, offsetY, -13.0);
+    sxR.rotation.y = Math.PI;
+    scene.add(sxR);
+}, undefined, err => console.error('Sphinx error:', err));
+
+// --- PHARAOH ---
+loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
+    const catModel = gltf.scene;
+
+    catModel.scale.setScalar(0.01);
+
+    const box = new THREE.Box3().setFromObject(catModel);
+    const size = box.getSize(new THREE.Vector3());
+
+    const targetHeight = 1.8;
+    const scaleFactor = targetHeight / size.y;
+    catModel.scale.setScalar(0.01 * scaleFactor);
+
+    const box2 = new THREE.Box3().setFromObject(catModel);
+    const offsetY = -box2.min.y;
+
+    catModel.traverse(child => {
+        if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; }
+    });
+
+    const catL = catModel.clone();
+    catL.position.set(-2.2, offsetY, -25.5);
+    scene.add(catL);
+
+    const catR = catModel.clone();
+    catR.position.set(2.2, offsetY, -25.5);
+    scene.add(catR);
+}, undefined, err => console.error('Pharaoh error:', err));
         }
 
-        // -------------------------------------------------------------------
-        // STATION 2 — WEIGHING SCALE (center back at 0, 0, -22)
-        // Unlocks after station 1. Drop the ANKH on the right pan to balance.
-        // -------------------------------------------------------------------
-        function buildStation2() {
+        function buildStation1() {
+    const tableMat = new THREE.MeshStandardMaterial({ color: 0x7A6A50, roughness: 0.7 });
+    const legMat   = new THREE.MeshStandardMaterial({ color: 0x6A5A40, roughness: 0.8 });
 
-            // Stone pedestal for scale
-            const pedMat = new THREE.MeshStandardMaterial({ color: 0x7A6A50, roughness: 0.9 });
+    const tableTop = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.08, 0.7), tableMat);
+    tableTop.position.set(-6, 0.84, -12);
+    tableTop.receiveShadow = true;
+    scene.add(tableTop);
+
+    [[-0.5,-0.28],[-0.5,0.28],[0.5,-0.28],[0.5,0.28]].forEach(([x,z]) => {
+        const leg = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.84, 0.1), legMat);
+        leg.position.set(-6 + x, 0.42, -12 + z);
+        scene.add(leg);
+    });
+
+    makeTextPanel('STATION 1\nAssemble the scroll', -6, 1.8, -12, 0.8, 0.35);
+
+    const colors = [0xD4A96A, 0xC8985E, 0xDDB87A, 0xBF8A50];
+    colors.forEach((color, i) => {
+        const geo = new THREE.PlaneGeometry(0.26, 0.18);
+        const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.9, side: THREE.DoubleSide });
+        const piece = new THREE.Mesh(geo, mat);
+        piece.position.set(-6 + (Math.random() - 0.5) * 0.8, 0.90, -12 + (Math.random() - 0.5) * 0.4);
+        piece.rotation.x = -Math.PI / 2;
+        piece.name = `piece_${i}`;
+        piece.userData.type = 'scrollPiece';
+        scene.add(piece);
+        scrollPieces.push(piece);
+        grabbableObjects.push(piece);
+    });
+}
+        function buildStation2() {
+            const pedMat = new THREE.MeshStandardMaterial({ color: 0x7A6A50, roughness: 0.7 });
             const ped = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.9, 0.5), pedMat);
-            ped.position.set(0, 0.45, -22);
+            ped.position.set(-6, 0.45, -22);
+            ped.receiveShadow = true;
             scene.add(ped);
 
-            // Scale — gold colored
-            const goldMat = new THREE.MeshStandardMaterial({ color: 0xDAA520, roughness: 0.3, metalness: 0.8 });
-
+            const goldMat = new THREE.MeshStandardMaterial({ color: 0xDAA520, roughness: 0.2, metalness: 0.8 });
             const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.04, 0.7, 12), goldMat);
-            pillar.position.set(0, 1.25, -22);
+            pillar.position.set(-6, 1.25, -22);
             scene.add(pillar);
 
             scaleBeamMesh = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.04, 0.04), goldMat);
-            scaleBeamMesh.position.set(0, 1.62, -22);
+            scaleBeamMesh.position.set(-6, 1.62, -22);
             scene.add(scaleBeamMesh);
 
-            // Left pan — has the "scarab" weight (fixed, glowing gold)
             scalePanLeft = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.025, 16), goldMat);
-            scalePanLeft.position.set(-0.42, 1.38, -22);
+            scalePanLeft.position.set(-6.42, 1.38, -22);
             scene.add(scalePanLeft);
 
-            // Scarab sitting on left pan (fixed reference weight)
-            const scarabMat = new THREE.MeshStandardMaterial({
-                color: 0xFFD700, roughness: 0.2, metalness: 0.9,
-                emissive: new THREE.Color(0xFFAA00), emissiveIntensity: 0.5
-            });
-            const scarabMesh = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.07, 0.12), scarabMat);
-            scarabMesh.position.set(-0.42, 1.42, -22);
-            scene.add(scarabMesh);
-
-            // Right pan — player places weights here
             scalePanRight = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.025, 16), goldMat);
-            scalePanRight.position.set(0.42, 1.38, -22);
+            scalePanRight.position.set(-5.58, 1.38, -22);
             scene.add(scalePanRight);
 
-            // Droppable weight objects near the scale
-            // ANKH = mass 1.0, matches the scarab. Others are wrong weights.
-            const weights = [
-                { name: 'ankh',   mass: 1.0, color: 0xFFD700, shape: 'ankh'   },
-                { name: 'feather',mass: 0.3, color: 0xF0EAD6, shape: 'small'  },
-                { name: 'jar',    mass: 2.0, color: 0xCC8844, shape: 'medium' },
-                { name: 'gem',    mass: 0.5, color: 0x44AAFF, shape: 'small'  },
-            ];
-
+            const weights = [{ name: 'ankh', mass: 1.0 }, { name: 'feather', mass: 0.3 }, { name: 'jar', mass: 2.0 }];
             weights.forEach((w, i) => {
-                const geo = w.shape === 'ankh'
-                    ? new THREE.BoxGeometry(0.07, 0.13, 0.04)
-                    : w.shape === 'medium'
-                        ? new THREE.CylinderGeometry(0.055, 0.055, 0.1, 8)
-                        : new THREE.SphereGeometry(0.045, 8, 8);
-
-                const mat = new THREE.MeshStandardMaterial({
-                    color: w.color, roughness: 0.4, metalness: w.name === 'ankh' ? 0.8 : 0.2,
-                    emissive: w.name === 'ankh' ? new THREE.Color(0xFFAA00) : new THREE.Color(0x000000),
-                    emissiveIntensity: w.name === 'ankh' ? 0.3 : 0
-                });
-
-                const mesh = new THREE.Mesh(geo, mat);
-                // Place weights on a small shelf to the right of the scale
-                mesh.position.set(1.5 + (i % 2) * 0.25, 0.95, -22 + Math.floor(i/2) * 0.25);
+                const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), new THREE.MeshStandardMaterial({color: 0xffffff}));
+                mesh.position.set(-5.3, 0.95, -21 + i * 0.3);
+                mesh.userData.type = 'weight';
+                mesh.userData.mass = w.mass;
                 mesh.name = w.name;
-                mesh.userData.type  = 'weight';
-                mesh.userData.mass  = w.mass;
-                mesh.userData.onScale = false;
-
+                mesh.castShadow = true;
                 scene.add(mesh);
                 scaleObjects.push(mesh);
                 grabbableObjects.push(mesh);
             });
 
-            // Small shelf for the weights
-            const shelfMat = new THREE.MeshStandardMaterial({ color: 0x6A5A40 });
-            const shelf = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.06, 0.5), shelfMat);
-            shelf.position.set(1.5, 0.9, -22);
-            scene.add(shelf);
+            makeTextPanel('STATION 2\nBalance the scales', -6, 2.2, -22, 0.9, 0.35);
 
-            // Label
-            makeTextPanel('STATION 2\nBalance the scales', 0, 2.2, -22, 0.9, 0.35);
-
-            // Station 2 starts dimmed — lit up when station 1 is solved
-            const s2Light = new THREE.PointLight(0xff5500, 0, 10);
+            const s2Light = new THREE.PointLight(0xFF4500, 0, 10); // UPDATED: Orange-Red color
             s2Light.name = 'station2Light';
-            s2Light.position.set(0, 3.5, -22);
+            s2Light.position.set(-6, 3.5, -22);
             scene.add(s2Light);
         }
 
-        // -------------------------------------------------------------------
-        // STATION 3 — GLYPH COUNTER (right platform at 5, 0, -17)
-        // Unlocks after station 2. Count suns, stars, snakes on the walls.
-        // -------------------------------------------------------------------
         function buildStation3() {
-
-            // Stone podium
-            const podMat = new THREE.MeshStandardMaterial({ color: 0x7A6A50, roughness: 0.9 });
+            const podMat = new THREE.MeshStandardMaterial({ color: 0x7A6A50, roughness: 0.7 });
             const pod = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.0, 0.5), podMat);
-            pod.position.set(5, 0.5, -17);
+            pod.position.set(6, 0.5, -12);
+            pod.receiveShadow = true;
             scene.add(pod);
 
-            // Frame slides out of right wall when activated
             station3Frame = new THREE.Group();
-            station3Frame.position.set(7.5, 2.0, -17); // starts inside wall
+            station3Frame.position.set(7.8, 2.0, -12); 
             station3Frame.rotation.y = -Math.PI / 2;
             station3Frame.visible = false;
             scene.add(station3Frame);
 
-            // Frame background panel
-            const frameBg = new THREE.Mesh(
-                new THREE.PlaneGeometry(1.0, 0.8),
-                new THREE.MeshStandardMaterial({ color: 0x2a1500, roughness: 1.0 })
-            );
+            const frameBg = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.8), new THREE.MeshStandardMaterial({ color: 0x2a1500 }));
             station3Frame.add(frameBg);
 
-            // Frame border
-            const borderMat = new THREE.MeshStandardMaterial({ color: 0xDAA520, roughness: 0.3, metalness: 0.8 });
-            [[0, 0.42, 0, 1.06, 0.04, 0.02],[0, -0.42, 0, 1.06, 0.04, 0.02],
-             [-0.53, 0, 0, 0.04, 0.86, 0.02],[0.53, 0, 0, 0.04, 0.86, 0.02]
-            ].forEach(([x,y,z,w,h,d]) => {
-                const b = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), borderMat);
-                b.position.set(x,y,z+0.02);
-                station3Frame.add(b);
-            });
-
-            // Glyph type labels and +/- buttons for each
-            const glyphTypes = ['sun','star','snake'];
-            const glyphSymbols = { sun: '☀', star: '★', snake: '~' };
-
-            glyphTypes.forEach((type, i) => {
-                const y = 0.22 - i * 0.22;
-
-                // Text label showing current count
-                const display = makeCanvasLabel(`${glyphSymbols[type]}  ${type}: 0`, 200, 60, '#D4A96A');
-                display.position.set(-0.18, y, 0.01);
-                display.scale.set(0.55, 0.165, 1);
-                display.name = `display_${type}`;
-                station3Frame.add(display);
-
-                // MINUS button
-                const minusBtn = new THREE.Mesh(
-                    new THREE.BoxGeometry(0.12, 0.1, 0.03),
-                    new THREE.MeshStandardMaterial({ color: 0x881111 })
-                );
-                minusBtn.position.set(0.26, y, 0.02);
-                minusBtn.name = `minus_${type}`;
-                minusBtn.userData.type = 'counterBtn';
-                minusBtn.userData.action = 'minus';
-                minusBtn.userData.glyphType = type;
-                station3Frame.add(minusBtn);
-                counterButtons.push(minusBtn);
-
-                // PLUS button
-                const plusBtn = new THREE.Mesh(
-                    new THREE.BoxGeometry(0.12, 0.1, 0.03),
-                    new THREE.MeshStandardMaterial({ color: 0x116611 })
-                );
-                plusBtn.position.set(0.42, y, 0.02);
-                plusBtn.name = `plus_${type}`;
-                plusBtn.userData.type = 'counterBtn';
-                plusBtn.userData.action = 'plus';
-                plusBtn.userData.glyphType = type;
-                station3Frame.add(plusBtn);
-                counterButtons.push(plusBtn);
-            });
-
-            // Label
-            makeTextPanel('STATION 3\nCount the glyphs', 5, 1.85, -15.5, 0.85, 0.35);
-
-            // Scatter glyph symbols on the tomb walls
+            makeTextPanel('STATION 3\nCount the glyphs', 6, 1.85, -12, 0.85, 0.35);
             spawnGlyphs();
 
-            // Station 3 starts dimmed
-            const s3Light = new THREE.PointLight(0xff5500, 0, 10);
+            const s3Light = new THREE.PointLight(0xFF4500, 0, 10);
             s3Light.name = 'station3Light';
-            s3Light.position.set(5, 3.5, -17);
+            s3Light.position.set(6, 3.5, -12);
             scene.add(s3Light);
         }
 
-        // -------------------------------------------------------------------
-        // SPAWN GLYPHS ON WALLS — procedurally placed
-        // Must match ANSWER = { sun:4, star:6, snake:3 }
-        // -------------------------------------------------------------------
-        function spawnGlyphs() {
-            const glyphData = [];
-            Object.entries(ANSWER).forEach(([type, count]) => {
-                for (let i = 0; i < count; i++) glyphData.push(type);
-            });
-            // Shuffle
-            for (let i = glyphData.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [glyphData[i], glyphData[j]] = [glyphData[j], glyphData[i]];
-            }
+        function buildStation4() {
+             const podMat = new THREE.MeshStandardMaterial({ color: 0x7A6A50, roughness: 0.7 });
+             const pod = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.0, 0.5), podMat);
+             pod.position.set(6, 0.5, -22);
+             pod.receiveShadow = true;
+             scene.add(pod);
+             makeTextPanel('STATION 4\nFinal Clue', 6, 1.85, -22, 0.85, 0.35);
+        }
 
+        function spawnGlyphs() {
             const symbols = { sun: '☀', star: '★', snake: '〜' };
             const colors  = { sun: '#FFD700', star: '#AAAAFF', snake: '#88FF88' };
-
-            // Wall positions: back wall (z=-24.8), left wall (x=-7.8), right wall (x=7.8)
-            const wallSlots = [];
-            for (let i = 0; i < 6; i++) wallSlots.push({ wall: 'back',  pos: new THREE.Vector3(-6 + i*2.4, 1.5 + Math.random()*1.5, -24.7), ry: 0 });
-            for (let i = 0; i < 5; i++) wallSlots.push({ wall: 'left',  pos: new THREE.Vector3(-7.7, 1.5 + Math.random()*1.5, -12 - i*2.2), ry:  Math.PI/2 });
-            for (let i = 0; i < 5; i++) wallSlots.push({ wall: 'right', pos: new THREE.Vector3( 7.7, 1.5 + Math.random()*1.5, -12 - i*2.2), ry: -Math.PI/2 });
-
-            glyphData.forEach((type, i) => {
-                if (i >= wallSlots.length) return;
-                const slot = wallSlots[i];
-
-                const canvas = document.createElement('canvas');
-                canvas.width = 64; canvas.height = 64;
-                const ctx = canvas.getContext('2d');
-                ctx.fillStyle = 'rgba(0,0,0,0)';
-                ctx.clearRect(0, 0, 64, 64);
-                ctx.fillStyle = colors[type];
-                ctx.font = '44px serif';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText(symbols[type], 32, 32);
-
-                const plane = new THREE.Mesh(
-                    new THREE.PlaneGeometry(0.4, 0.4),
-                    new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true })
-                );
-                plane.position.copy(slot.pos);
-                plane.rotation.y = slot.ry;
-                plane.userData.glyphType = type;
-                scene.add(plane);
+            Object.entries(ANSWER).forEach(([type, count]) => {
+                for (let i = 0; i < count; i++) {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 64; canvas.height = 64;
+                    const ctx = canvas.getContext('2d');
+                    ctx.fillStyle = colors[type];
+                    ctx.font = '44px serif';
+                    ctx.fillText(symbols[type], 10, 50);
+                    const plane = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.4), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true }));
+                    plane.position.set((Math.random()-0.5)*14, 1+Math.random()*2.5, -24.8);
+                    scene.add(plane);
+                }
             });
         }
 
-        // -------------------------------------------------------------------
-        // BUILD LEVER — appears after station 3 is solved
-        // Pull it to open the doors and trigger the finale
-        // -------------------------------------------------------------------
+        function buildWallPaintings() {
+            // Called for both tomb side walls AND corridor walls
+            // Tomb side walls: x=±9 inner face, z centre -17, length 20
+            // Corridor walls: x=±2 inner face, z centre -2, length 14
+
+            function drawEgyptMural(cw, ch, seed) {
+                const canvas = document.createElement('canvas');
+                canvas.width = cw; canvas.height = ch;
+                const ctx = canvas.getContext('2d');
+
+                // ── Sandy ochre stone base ──
+                const grad = ctx.createLinearGradient(0,0,0,ch);
+                grad.addColorStop(0,   '#D4A855');
+                grad.addColorStop(0.4, '#C89840');
+                grad.addColorStop(1,   '#A07830');
+                ctx.fillStyle = grad;
+                ctx.fillRect(0, 0, cw, ch);
+
+                // Age stains
+                ctx.globalAlpha = 0.08;
+                for (let i=0;i<60;i++){
+                    const sx=(i/60)*cw+Math.sin(i)*30;
+                    ctx.fillStyle = i%3===0?'#7A4A10':i%3===1?'#E8C870':'#5A3010';
+                    ctx.fillRect(sx,0,1+Math.random()*4,ch);
+                }
+                ctx.globalAlpha = 1;
+
+                // ── Frieze bands top & bottom ──
+                const FB = Math.round(ch*0.14);
+                // Top band
+                ctx.fillStyle='#8B3A0A'; ctx.fillRect(0,0,cw,FB);
+                // Decorative stripe inside top band
+                ctx.fillStyle='#F5C040'; ctx.fillRect(0,FB-4,cw,4);
+                ctx.fillStyle='#5A1800'; ctx.fillRect(0,0,cw,3);
+
+                // Bottom band
+                ctx.fillStyle='#8B3A0A'; ctx.fillRect(0,ch-FB,cw,FB);
+                ctx.fillStyle='#F5C040'; ctx.fillRect(0,ch-FB,cw,4);
+                ctx.fillStyle='#5A1800'; ctx.fillRect(0,ch-3,cw,3);
+
+                // Hieroglyphs in bands - repeating rows
+                const GLYPHS = ['𓂀','𓆣','𓇳','𓏏','𓆑','𓃭','𓂋','𓅓','𓆗','𓏲','𓇯','𓏭','𓄿','𓇋','𓏲','𓃒'];
+                const gSize = Math.round(FB * 0.65);
+                ctx.font = `${gSize}px serif`;
+                ctx.fillStyle = '#F5D080';
+                ctx.textAlign = 'left';
+                const step = gSize + 4;
+                for (let gx=0; gx<cw; gx+=step) {
+                    const gi = Math.floor(gx/step + seed) % GLYPHS.length;
+                    ctx.fillText(GLYPHS[gi], gx+2, FB-4);
+                    ctx.fillText(GLYPHS[(gi+7)%GLYPHS.length], gx+2, ch-5);
+                }
+
+                // ── Scene area ──
+                const SY = FB + 2;
+                const SH = ch - FB*2 - 4;
+                const GY = SY + SH; // ground line y
+
+                // Ground register line
+                ctx.strokeStyle='#6B3010'; ctx.lineWidth=2;
+                ctx.beginPath(); ctx.moveTo(0,GY-2); ctx.lineTo(cw,GY-2); ctx.stroke();
+
+                // Top register line
+                ctx.beginPath(); ctx.moveTo(0,SY+2); ctx.lineTo(cw,SY+2); ctx.stroke();
+
+                // ── Figure drawing ──
+                function fig(x, scl, dir, type) {
+                    // type: 0=pharaoh, 1=priest, 2=god, 3=worker, 4=seated
+                    ctx.save();
+                    ctx.translate(x, GY);
+                    ctx.scale(dir * scl, scl);
+
+                    const H = 160; // figure height in canvas units
+                    const skin  = type===2?'#8B4513': type===3?'#A0522D':'#CD853F';
+                    const kilt  = type===2?'#DAA520': type===1?'#F5F5DC':'#FFFFFF';
+                    const crown = type===0?'#1E5A8A': type===2?'#DAA520':'none';
+
+                    // Legs (stride pose)
+                    ctx.fillStyle=skin;
+                    ctx.fillRect(-6, -H*0.47, 10, H*0.47);  // back leg
+                    ctx.fillRect(8,  -H*0.50, 10, H*0.47);  // front leg
+
+                    // Kilt/skirt
+                    ctx.fillStyle=kilt;
+                    ctx.beginPath();
+                    ctx.moveTo(-8,-H*0.47); ctx.lineTo(22,-H*0.47);
+                    ctx.lineTo(20,-H*0.27); ctx.lineTo(-6,-H*0.27);
+                    ctx.closePath(); ctx.fill();
+                    ctx.strokeStyle='#8B6914'; ctx.lineWidth=1; ctx.stroke();
+                    if(type===2){// gold belt
+                        ctx.strokeStyle='#FFD700'; ctx.lineWidth=2;
+                        ctx.beginPath();ctx.moveTo(-8,-H*0.47);ctx.lineTo(22,-H*0.47);ctx.stroke();
+                    }
+
+                    // Torso
+                    ctx.fillStyle=skin;
+                    ctx.fillRect(-6,-H*0.77, 26, H*0.31);
+
+                    // Collar necklace
+                    ctx.strokeStyle='#DAA520'; ctx.lineWidth=3;
+                    ctx.beginPath(); ctx.arc(7,-H*0.65,14,-Math.PI*0.8,0.1); ctx.stroke();
+                    // Collar beads
+                    ctx.fillStyle='#1E5A8A';
+                    for(let b=0;b<5;b++){
+                        const ba=-Math.PI*0.75+b*(Math.PI*0.85/4);
+                        ctx.beginPath(); ctx.arc(7+Math.cos(ba)*14,-H*0.65+Math.sin(ba)*14,2.5,0,Math.PI*2); ctx.fill();
+                    }
+
+                    // Head (profile)
+                    ctx.fillStyle=skin;
+                    ctx.beginPath(); ctx.ellipse(8,-H*0.88,12,15,-0.1,0,Math.PI*2); ctx.fill();
+
+                    // Crown/headdress
+                    if(type===0){ // nemes blue+gold stripes
+                        ctx.fillStyle='#1E5A8A';
+                        ctx.beginPath();
+                        ctx.moveTo(-4,-H*0.98); ctx.lineTo(20,-H*0.98);
+                        ctx.lineTo(18,-H*0.77); ctx.lineTo(-2,-H*0.77);
+                        ctx.closePath(); ctx.fill();
+                        ctx.fillStyle='#DAA520';
+                        for(let s=0;s<4;s++) ctx.fillRect(-3+s*5,-H*0.98,3,H*0.21);
+                        // uraeus
+                        ctx.fillStyle='#C03020';
+                        ctx.beginPath(); ctx.arc(18,-H*0.98,4,0,Math.PI*2); ctx.fill();
+                    } else if(type===2){ // tall white double crown
+                        ctx.fillStyle='#F5F5DC';
+                        ctx.fillRect(0,-H*1.22,16,H*0.25);
+                        ctx.beginPath(); ctx.arc(8,-H*1.22,8,Math.PI,0); ctx.fill();
+                        ctx.fillStyle='#C03020'; // red inner
+                        ctx.fillRect(3,-H*1.18,10,H*0.18);
+                    } else if(type===1){ // shaved or wig
+                        ctx.fillStyle='#1A0A00';
+                        ctx.beginPath(); ctx.ellipse(7,-H*0.90,11,13,0,0,Math.PI*2); ctx.fill();
+                    }
+
+                    // Eye (kohl-lined profile)
+                    ctx.fillStyle='#1A0A00';
+                    ctx.beginPath(); ctx.ellipse(16,-H*0.86,5,3,0,0,Math.PI*2); ctx.fill();
+                    ctx.fillStyle='#FFFFFF';
+                    ctx.beginPath(); ctx.ellipse(15,-H*0.86,3,2,0,0,Math.PI*2); ctx.fill();
+                    ctx.fillStyle='#1A0A00';
+                    ctx.beginPath(); ctx.arc(16,-H*0.86,2,0,Math.PI*2); ctx.fill();
+                    // kohl line
+                    ctx.strokeStyle='#000'; ctx.lineWidth=1.5;
+                    ctx.beginPath(); ctx.moveTo(20,-H*0.84); ctx.lineTo(26,-H*0.80); ctx.stroke();
+
+                    // Forward arm (offering)
+                    ctx.strokeStyle=skin; ctx.lineWidth=7;
+                    ctx.beginPath(); ctx.moveTo(8,-H*0.68); ctx.lineTo(34,-H*0.55); ctx.stroke();
+                    ctx.fillStyle=skin;
+                    ctx.beginPath(); ctx.arc(34,-H*0.53,6,0,Math.PI*2); ctx.fill();
+
+                    // Back arm (down)
+                    ctx.beginPath(); ctx.moveTo(4,-H*0.68); ctx.lineTo(-2,-H*0.50); ctx.stroke();
+
+                    // Worker variant: bent carrying pose
+                    if(type===3){
+                        ctx.strokeStyle=skin; ctx.lineWidth=7;
+                        ctx.beginPath(); ctx.moveTo(8,-H*0.68); ctx.lineTo(10,-H*0.45); ctx.stroke();
+                        ctx.beginPath(); ctx.moveTo(4,-H*0.68); ctx.lineTo(-8,-H*0.78); ctx.stroke();
+                        // load on back
+                        ctx.fillStyle='#8B6914';
+                        ctx.fillRect(-14,-H*0.88,12,18);
+                    }
+
+                    ctx.restore();
+                }
+
+                // ── Glyph column ──
+                function glyphCol(x, n, off) {
+                    const gs2 = Math.round(SH*0.11);
+                    ctx.font=`${gs2}px serif`; ctx.fillStyle='#5A2800'; ctx.textAlign='center';
+                    for(let i=0;i<n;i++) ctx.fillText(GLYPHS[(off+i)%GLYPHS.length], x, SY+14+i*(gs2+2));
+                }
+
+                // ── Decorative elements ──
+                function lotus(x) {
+                    ctx.strokeStyle='#2A7A30'; ctx.lineWidth=2;
+                    ctx.beginPath(); ctx.moveTo(x,GY-2); ctx.lineTo(x,GY-SH*0.4); ctx.stroke();
+                    const ly=GY-SH*0.4;
+                    const pColors=['#E860A0','#C040A0','#FF80C0','#D050B0','#F070B0'];
+                    for(let p=0;p<5;p++){
+                        const a=(p/5)*Math.PI*2-Math.PI/2;
+                        ctx.fillStyle=pColors[p];
+                        ctx.beginPath();
+                        ctx.ellipse(x+Math.cos(a)*10,ly+Math.sin(a)*10,5,12,a,0,Math.PI*2);
+                        ctx.fill();
+                    }
+                    ctx.fillStyle='#FFD700';
+                    ctx.beginPath(); ctx.arc(x,ly,7,0,Math.PI*2); ctx.fill();
+                }
+
+                function ankh(x, y, s) {
+                    ctx.strokeStyle='#DAA520'; ctx.lineWidth=s*3;
+                    ctx.beginPath(); ctx.moveTo(x,y-s*6); ctx.lineTo(x,y+s*14); ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(x-s*6,y); ctx.lineTo(x+s*6,y); ctx.stroke();
+                    ctx.beginPath(); ctx.arc(x,y-s*6,s*5,0,Math.PI*2); ctx.stroke();
+                }
+
+                function altar(x) {
+                    const ay=GY;
+                    ctx.fillStyle='#7A4A18';
+                    ctx.fillRect(x-28,ay-SH*0.18,56,8);
+                    ctx.fillRect(x-22,ay-SH*0.18+8,8,SH*0.18-8);
+                    ctx.fillRect(x+14,ay-SH*0.18+8,8,SH*0.18-8);
+                    // offerings
+                    ctx.fillStyle='#C03020'; ctx.beginPath(); ctx.arc(x-10,ay-SH*0.18-8,7,0,Math.PI*2); ctx.fill();
+                    ctx.fillStyle='#E8C040'; ctx.beginPath(); ctx.arc(x+10,ay-SH*0.18-8,6,0,Math.PI*2); ctx.fill();
+                    ctx.fillStyle='#40A040'; ctx.fillRect(x-4,ay-SH*0.18-24,8,16);
+                }
+
+                function scarab(x,y) {
+                    ctx.fillStyle='#2040C0';
+                    ctx.beginPath(); ctx.ellipse(x,y,14,18,0,0,Math.PI*2); ctx.fill();
+                    ctx.strokeStyle='#6080FF'; ctx.lineWidth=1.5;
+                    ctx.beginPath();ctx.moveTo(x,y-16);ctx.lineTo(x,y+16);ctx.stroke();
+                    ctx.beginPath();ctx.moveTo(x-14,y);ctx.lineTo(x+14,y);ctx.stroke();
+                    ctx.fillStyle='#FFD700';
+                    ctx.beginPath(); ctx.arc(x,y-26,9,0,Math.PI*2); ctx.fill();
+                }
+
+                function sunDisc(x,y,r) {
+                    ctx.fillStyle='#FFD700';
+                    ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
+                    ctx.strokeStyle='#FF8C00'; ctx.lineWidth=2; ctx.stroke();
+                    for(let i=0;i<12;i++){
+                        const a=(i/12)*Math.PI*2;
+                        ctx.beginPath();
+                        ctx.moveTo(x+Math.cos(a)*(r+2),y+Math.sin(a)*(r+2));
+                        ctx.lineTo(x+Math.cos(a)*(r+10),y+Math.sin(a)*(r+10));
+                        ctx.strokeStyle='#FFD700'; ctx.lineWidth=1.5; ctx.stroke();
+                    }
+                }
+
+                // ── Layout: repeating sections ──
+                const SEC = Math.round(cw * 0.22); // section width ~22% of canvas
+                const nSec = Math.ceil(cw / SEC) + 1;
+                const figH = SH * 0.95;
+                const figScale = figH / 160;
+
+                for(let s=0; s<nSec; s++){
+                    const ox = s * SEC;
+                    const sc = (s + seed) % 5;
+
+                    glyphCol(ox+18, 5, (s*3+seed)%GLYPHS.length);
+
+                    if(sc===0){
+                        // Pharaoh offering to god at altar
+                        fig(ox+70,  figScale*0.9,  1, 0); // pharaoh
+                        fig(ox+170, figScale*0.85, 1, 1); // priest
+                        altar(ox+SEC*0.58);
+                        fig(ox+SEC*0.72, figScale*0.95,-1, 2); // god
+                        ankh(ox+SEC*0.58, GY-SH*0.55, figScale*8);
+                        scarab(ox+SEC*0.58, SY+SH*0.22);
+
+                    } else if(sc===1){
+                        // Procession of workers
+                        fig(ox+50,  figScale*0.9,  1, 2);
+                        fig(ox+130, figScale*0.8,  1, 3);
+                        fig(ox+195, figScale*0.8,  1, 3);
+                        fig(ox+260, figScale*0.8,  1, 1);
+                        lotus(ox+SEC*0.8);
+                        lotus(ox+SEC*0.45);
+                        sunDisc(ox+SEC*0.62, SY+SH*0.28, SH*0.12);
+
+                    } else if(sc===2){
+                        // Weighing of the heart
+                        fig(ox+60,  figScale*0.9,  1, 2);
+                        fig(ox+SEC*0.85, figScale*0.85,-1, 1);
+                        // Scales of Ma'at
+                        const sx=ox+SEC*0.5, sb=SY+SH*0.15;
+                        ctx.strokeStyle='#DAA520'; ctx.lineWidth=3;
+                        ctx.beginPath();ctx.moveTo(sx,sb);ctx.lineTo(sx,sb+SH*0.55);ctx.stroke();
+                        ctx.beginPath();ctx.moveTo(sx-SEC*0.2,sb+SH*0.1);ctx.lineTo(sx+SEC*0.2,sb+SH*0.1);ctx.stroke();
+                        ctx.beginPath();ctx.moveTo(sx-SEC*0.2,sb+SH*0.1);ctx.lineTo(sx-SEC*0.2,sb+SH*0.38);ctx.stroke();
+                        ctx.arc(sx-SEC*0.2,sb+SH*0.40,SEC*0.08,0,Math.PI); ctx.stroke();
+                        ctx.beginPath();ctx.moveTo(sx+SEC*0.2,sb+SH*0.1);ctx.lineTo(sx+SEC*0.2,sb+SH*0.28);ctx.stroke();
+                        ctx.beginPath();ctx.arc(sx+SEC*0.2,sb+SH*0.30,SEC*0.08,0,Math.PI); ctx.stroke();
+                        ctx.font=`${SH*0.18}px serif`; ctx.textAlign='center';
+                        ctx.fillStyle='#C03020'; ctx.fillText('𓃒',sx-SEC*0.2,sb+SH*0.41);
+                        ctx.fillStyle='#F5D080'; ctx.fillText('𓆃',sx+SEC*0.2,sb+SH*0.31);
+                        ctx.font=`bold ${SH*0.3}px serif`; ctx.fillStyle='#F5D080';
+                        ctx.fillText('𓂀',sx,SY+SH*0.35);
+
+                    } else if(sc===3){
+                        // Solar barque procession
+                        fig(ox+60,  figScale*0.9,  1, 0);
+                        fig(ox+145, figScale*0.8,  1, 1);
+                        fig(ox+SEC*0.75, figScale*0.85,-1, 1);
+                        fig(ox+SEC*0.9,  figScale*0.9, -1, 2);
+                        // barque
+                        const bx=ox+SEC*0.52, by=GY-SH*0.32;
+                        ctx.fillStyle='#C8922A'; ctx.strokeStyle='#DAA520'; ctx.lineWidth=2;
+                        ctx.beginPath();
+                        ctx.moveTo(bx-SEC*0.16,by);
+                        ctx.quadraticCurveTo(bx,by+SH*0.12,bx+SEC*0.16,by);
+                        ctx.quadraticCurveTo(bx,by-SH*0.04,bx-SEC*0.16,by);
+                        ctx.fill(); ctx.stroke();
+                        sunDisc(bx, by-SH*0.18, SH*0.11);
+                        lotus(ox+SEC*0.52-SEC*0.1);
+                        lotus(ox+SEC*0.52+SEC*0.1);
+
+                    } else {
+                        // Animal-headed gods ceremony
+                        fig(ox+60,  figScale*0.9, 1, 2);
+                        fig(ox+150, figScale*0.85,1, 0);
+                        fig(ox+240, figScale*0.8, 1, 1);
+                        altar(ox+SEC*0.62);
+                        fig(ox+SEC*0.78, figScale*0.9,-1, 2);
+                        ankh(ox+SEC*0.3, GY-SH*0.5, figScale*7);
+                        scarab(ox+SEC*0.15, SY+SH*0.25);
+                    }
+                }
+
+                return canvas;
+            }
+
+            // ── Load the mural texture once, apply to all walls ──
+            const muralLoader = new THREE.TextureLoader();
+
+            // Show canvas fallback immediately, swap to real photo when loaded
+            const fallbackCanvas = drawEgyptMural(4096, 512, 0);
+            const fallbackTex = new THREE.CanvasTexture(fallbackCanvas);
+
+            // All mural materials share the same texture (one load)
+            const muralMats = [];
+
+            function muralMesh(w, h, pos, rotY) {
+                const mat = new THREE.MeshBasicMaterial({ map: fallbackTex, side: THREE.FrontSide });
+                muralMats.push(mat);
+                const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
+                mesh.position.copy(pos);
+                mesh.rotation.y = rotY;
+                scene.add(mesh);
+                return mesh;
+            }
+
+            // ── TOMB SIDE WALLS — full wall coverage (height 5.4) ──
+            muralMesh(20, 5.4, new THREE.Vector3(-8.83, 2.7, -17),  Math.PI/2);
+            muralMesh(20, 5.4, new THREE.Vector3( 8.83, 2.7, -17), -Math.PI/2);
+
+            // ── TOMB BACK WALL (z=-27) full height ──
+            muralMesh(18, 5.4, new THREE.Vector3(0, 2.7, -26.83), 0);
+
+            // ── TOMB FRONT WALL (z=-7, either side of corridor opening) ──
+            muralMesh(6, 5.4, new THREE.Vector3(-6,   2.7, -7.17), Math.PI);
+            muralMesh(6, 5.4, new THREE.Vector3( 6,   2.7, -7.17), Math.PI);
+            // Frieze above corridor opening
+            muralMesh(3, 1.3, new THREE.Vector3(0, 4.6, -7.17), Math.PI);
+
+            // ── CORRIDOR SIDE WALLS ──
+            muralMesh(16, 3.4, new THREE.Vector3(-1.83, 1.7, -1),  Math.PI/2);
+            muralMesh(16, 3.4, new THREE.Vector3( 1.83, 1.7, -1), -Math.PI/2);
+
+            // Swap all to real texture once loaded
+            muralLoader.load('Assets/textures/facts-about-ancient-egypt-1.jpg', (tex) => {
+                tex.wrapS = THREE.RepeatWrapping;
+                tex.wrapT = THREE.ClampToEdgeWrapping;
+                muralMats.forEach(m => { m.map = tex; m.needsUpdate = true; });
+            });
+        }
+
+        function buildEgyptExit() {
+            const DOOR_Z = 6.2;
+
+            // ── Seal walls around the door (so tomb is fully enclosed) ──
+            const wallMat2 = new THREE.MeshStandardMaterial({color: 0x4A2D18, roughness: 0.9});
+            // Stone wall above the doorway (between lintel and ceiling)
+            const aboveDoor = new THREE.Mesh(new THREE.BoxGeometry(4, 1, 0.3), wallMat2);
+            aboveDoor.position.set(0, 4.1, DOOR_Z); scene.add(aboveDoor);
+            // Short stone panels to either side of the door (corridor is 4 wide, door is 3 wide)
+            const leftPanel = new THREE.Mesh(new THREE.BoxGeometry(0.6, 4, 0.3), wallMat2);
+            leftPanel.position.set(-1.9, 2, DOOR_Z); scene.add(leftPanel);
+            const rightPanel = new THREE.Mesh(new THREE.BoxGeometry(0.6, 4, 0.3), wallMat2);
+            rightPanel.position.set(1.9, 2, DOOR_Z); scene.add(rightPanel);
+
+            // ── Door frame ──
+            const frameMat = new THREE.MeshStandardMaterial({color:0x8B6914,roughness:0.7,metalness:0.3,emissive:0x3A2A00,emissiveIntensity:0.4});
+            [[-1.5,2,DOOR_Z],[1.5,2,DOOR_Z]].forEach(([x,y,z])=>{
+                const j=new THREE.Mesh(new THREE.BoxGeometry(0.4,4,0.4),frameMat);
+                j.position.set(x,y,z); scene.add(j);
+            });
+            const lintel=new THREE.Mesh(new THREE.BoxGeometry(3.4,0.5,0.4),frameMat);
+            lintel.position.set(0,4.1,DOOR_Z); scene.add(lintel);
+
+            // ── Animated door halves — decorated Egyptian wood ──
+            // Draw wood grain + hieroglyph panel as texture
+            function doorTex() {
+                const dc = document.createElement('canvas');
+                dc.width = 256; dc.height = 512;
+                const dx = dc.getContext('2d');
+                // Dark wood base
+                const wg = dx.createLinearGradient(0,0,256,0);
+                wg.addColorStop(0, '#3A1A06');
+                wg.addColorStop(0.5, '#5A2A0A');
+                wg.addColorStop(1, '#3A1A06');
+                dx.fillStyle = wg; dx.fillRect(0,0,256,512);
+                // Vertical wood grain streaks
+                dx.strokeStyle = 'rgba(20,8,0,0.4)';
+                dx.lineWidth = 2;
+                for (let i = 0; i < 18; i++) {
+                    dx.beginPath();
+                    dx.moveTo(10 + i * 14, 0);
+                    dx.lineTo(10 + i * 14 + Math.sin(i)*4, 512);
+                    dx.stroke();
+                }
+                // Carved panel in centre
+                dx.strokeStyle = '#8B6914';
+                dx.lineWidth = 4;
+                dx.strokeRect(30, 80, 196, 350);
+                dx.strokeRect(40, 90, 176, 330);
+                // Hieroglyphs inside panel
+                dx.fillStyle = '#DAA520';
+                dx.font = 'bold 52px serif';
+                dx.textAlign = 'center';
+                ['𓂀','𓆣','𓇳','𓏏','𓆑','𓃭','𓅓'].forEach((g,i) => {
+                    dx.fillText(g, 128, 135 + i * 50);
+                });
+                // Gold border strip at top and bottom
+                dx.fillStyle = '#DAA520';
+                dx.fillRect(0, 0, 256, 10);
+                dx.fillRect(0, 502, 256, 10);
+                return new THREE.CanvasTexture(dc);
+            }
+            const dTex = doorTex();
+            // Use MeshBasicMaterial so door is always fully visible regardless of lighting
+            const doorMat = new THREE.MeshBasicMaterial({ map: dTex });
+
+            // Single solid door slab that SLIDES UP (portcullis style)
+            const doorSlab = new THREE.Mesh(new THREE.BoxGeometry(2.9, 3.8, 0.15), doorMat);
+            doorSlab.position.set(0, 1.9, DOOR_Z);
+            scene.add(doorSlab);
+            doorSlab.userData.closedY = 1.9;
+
+            // Gold studs — children of door so they move with it
+            const studMat=new THREE.MeshStandardMaterial({color:0xDAA520,metalness:0.9,roughness:0.2,emissive:0x402000,emissiveIntensity:0.5});
+            // 3 columns × 3 rows of studs on the slab
+            [[-1.1,1.3],[0,1.3],[1.1,1.3],
+             [-1.1,0.0],[0,0.0],[1.1,0.0],
+             [-1.1,-1.3],[0,-1.3],[1.1,-1.3]].forEach(([sx,sy])=>{
+                const s2=new THREE.Mesh(new THREE.SphereGeometry(0.08,8,8),studMat);
+                s2.position.set(sx,sy,0.08); doorSlab.add(s2);
+            });
+
+            // Store references: use doorL to hold the single slab for compatibility
+            scene.userData.doorSlab = doorSlab;
+            scene.userData.doorOpen = false;
+            scene.userData.doorT = 0;
+            scene.userData.DOOR_Z = DOOR_Z;
+
+            // ── Egypt world starts here ──
+            const EZ = 14; // just past the door
+
+            // ── BACKGROUND: use outsideEgypt.jpg as equirectangular scene.background ──
+            // Build a fallback blue-sky gradient canvas first
+            const fallbackCanvas = document.createElement('canvas');
+            fallbackCanvas.width = 2048; fallbackCanvas.height = 1024;
+            const fc = fallbackCanvas.getContext('2d');
+            // Sky gradient
+            const skyG = fc.createLinearGradient(0,0,0,1024);
+            skyG.addColorStop(0,   '#1A6BC8');
+            skyG.addColorStop(0.5, '#4A9AE8');
+            skyG.addColorStop(0.7, '#C8D8F0');
+            skyG.addColorStop(0.8, '#E8D090');
+            skyG.addColorStop(1,   '#D4A840');
+            fc.fillStyle = skyG; fc.fillRect(0,0,2048,1024);
+            // Sun
+            const sunG = fc.createRadialGradient(1400,700,0,1400,700,160);
+            sunG.addColorStop(0,'rgba(255,255,200,1)');
+            sunG.addColorStop(0.3,'rgba(255,220,80,0.9)');
+            sunG.addColorStop(1,'rgba(255,180,0,0)');
+            fc.fillStyle=sunG; fc.fillRect(0,0,2048,1024);
+            // Horizon haze
+            const hazeG=fc.createLinearGradient(0,680,0,780);
+            hazeG.addColorStop(0,'rgba(220,200,160,0)');
+            hazeG.addColorStop(0.5,'rgba(220,200,160,0.6)');
+            hazeG.addColorStop(1,'rgba(200,180,140,0)');
+            fc.fillStyle=hazeG; fc.fillRect(0,680,2048,100);
+            // Desert ground (bottom third)
+            const desG=fc.createLinearGradient(0,780,0,1024);
+            desG.addColorStop(0,'#D4A840'); desG.addColorStop(1,'#C09030');
+            fc.fillStyle=desG; fc.fillRect(0,780,2048,244);
+            // Pyramid silhouettes on horizon
+            [[200,760,320,240],[550,760,420,310],[950,760,540,400],[1380,760,400,300],[1750,760,300,220]].forEach(([cx,by,w,h])=>{
+                fc.fillStyle='#8B6010';
+                fc.beginPath(); fc.moveTo(cx,by-h); fc.lineTo(cx-w/2,by); fc.lineTo(cx+w/2,by); fc.closePath(); fc.fill();
+                fc.fillStyle='rgba(255,200,80,0.15)';
+                fc.beginPath(); fc.moveTo(cx,by-h); fc.lineTo(cx,by); fc.lineTo(cx+w/2,by); fc.closePath(); fc.fill();
+            });
+            // Sand ripples
+            fc.strokeStyle='rgba(160,120,20,0.4)'; fc.lineWidth=2;
+            for(let r=0;r<12;r++){
+                fc.beginPath(); fc.moveTo(0,800+r*18);
+                fc.quadraticCurveTo(1024,790+r*18+Math.sin(r)*8,2048,800+r*18);
+                fc.stroke();
+            }
+            const fallbackTex = new THREE.CanvasTexture(fallbackCanvas);
+            fallbackTex.mapping = THREE.EquirectangularReflectionMapping;
+
+            // Store for animate loop to swap in/out
+            scene.userData.egyptBg = fallbackTex;
+            scene.userData.tombBg  = new THREE.Color(0x0A0402);
+            scene.userData.egyptStartZ = 8;
+
+            // Load real photo — swap when ready
+            new THREE.TextureLoader().load(
+                'Assets/textures/outsideEgypt.jpg',
+                (tex) => {
+                    tex.mapping = THREE.EquirectangularReflectionMapping;
+                    scene.userData.egyptBg = tex;
+                    // If player is already outside, apply immediately
+                    if (cameraRig.position.z > 8) scene.background = tex;
+                },
+                undefined, () => {} // silent fallback
+            );
+
+            // ── SANDY GROUND — only in Egypt area, doesn't reach back to tomb ──
+            const sandMat = new THREE.MeshStandardMaterial({color:0xD4A840, roughness:1.0});
+            const ground = new THREE.Mesh(new THREE.PlaneGeometry(300,200), sandMat);
+            ground.rotation.x = -Math.PI/2;
+            // Position so front edge starts at DOOR_Z+0.3 (just past the door), extends forward
+            ground.position.set(0, 0, DOOR_Z + 100 + 0.3);
+            scene.add(ground);
+
+            // Sand dune bumps
+            const duneMat = new THREE.MeshStandardMaterial({color:0xC09030,roughness:1});
+            [[0,25,18,4],[20,40,14,3],[-18,35,16,3.5],[30,20,12,2.5],[-30,30,14,3]].forEach(([dx,dz,r,h])=>{
+                const d=new THREE.Mesh(new THREE.SphereGeometry(1,12,8),duneMat);
+                d.scale.set(r,h,r*1.5); d.position.set(dx,h*0.3,EZ+dz); scene.add(d);
+            });
+
+            // ── PYRAMIDS (3D cones) ──
+            const pyrMat = new THREE.MeshStandardMaterial({color:0xC8A040,roughness:0.9});
+            const pyrLitMat = new THREE.MeshStandardMaterial({color:0xE8C060,roughness:0.9,emissive:0x402000,emissiveIntensity:0.2});
+            function makePyr(px,pz,sz){
+                const geo=new THREE.ConeGeometry(sz,sz*1.3,4);
+                // Split into dark/lit faces by creating two half-cones
+                const m=new THREE.Mesh(geo,pyrMat);
+                m.rotation.y=Math.PI/4; m.position.set(px,sz*0.65,pz); scene.add(m);
+                // Lit face overlay
+                const litGeo=new THREE.ConeGeometry(sz*1.002,sz*1.3,4);
+                const litM=new THREE.Mesh(litGeo,pyrLitMat);
+                litM.rotation.y=Math.PI/4+Math.PI*0.5; litM.position.set(px,sz*0.65,pz);
+                litM.scale.x=0.5; scene.add(litM);
+                // Gold capstone
+                const cap=new THREE.Mesh(new THREE.SphereGeometry(sz*0.06,6,6),new THREE.MeshBasicMaterial({color:0xFFD700}));
+                cap.position.set(px,sz*1.3,pz); scene.add(cap);
+            }
+            makePyr(-24, EZ+55, 13);
+            makePyr(  1, EZ+68, 19); // Great pyramid
+            makePyr( 28, EZ+50, 11);
+            makePyr(-46, EZ+75,  8);
+            makePyr( 50, EZ+62,  9);
+
+            // ── SPHINX ──
+            const sM=new THREE.MeshStandardMaterial({color:0xB88820,roughness:0.9,emissive:0x301000,emissiveIntensity:0.25});
+            const sBody=new THREE.Mesh(new THREE.BoxGeometry(6,2.2,11),sM);
+            sBody.position.set(-36,1.1,EZ+28); scene.add(sBody);
+            const sHead=new THREE.Mesh(new THREE.BoxGeometry(2.5,3.2,2.5),sM);
+            sHead.position.set(-36,3.7,EZ+22); scene.add(sHead);
+            const sNemes=new THREE.Mesh(new THREE.BoxGeometry(3.4,2.2,1.4),sM);
+            sNemes.position.set(-36,5.2,EZ+22); scene.add(sNemes);
+            // Paws
+            [-37.5,-34.5].forEach(px2=>{
+                const p2=new THREE.Mesh(new THREE.BoxGeometry(1.6,0.8,3),sM);
+                p2.position.set(px2,0.4,EZ+19); scene.add(p2);
+            });
+
+            // ── OBELISK ──
+            const obM=new THREE.MeshStandardMaterial({color:0xD4A030,roughness:0.6,metalness:0.15,emissive:0x301000,emissiveIntensity:0.3});
+            const ob=new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.38,12,4),obM);
+            ob.rotation.y=Math.PI/4; ob.position.set(18,6,EZ+16); scene.add(ob);
+            const obTip=new THREE.Mesh(new THREE.ConeGeometry(0.14,1.4,4),new THREE.MeshBasicMaterial({color:0xFFD700}));
+            obTip.rotation.y=Math.PI/4; obTip.position.set(18,12.7,EZ+16); scene.add(obTip);
+
+            // ── PALM TREES ──
+            function palm(px,pz){
+                const tM=new THREE.MeshStandardMaterial({color:0x5A3410});
+                const trunk=new THREE.Mesh(new THREE.CylinderGeometry(0.08,0.18,5.5,6),tM);
+                trunk.position.set(px,2.75,pz); scene.add(trunk);
+                const lM=new THREE.MeshStandardMaterial({color:0x2A8020,side:THREE.DoubleSide});
+                for(let l=0;l<8;l++){
+                    const a=(l/8)*Math.PI*2;
+                    const leaf=new THREE.Mesh(new THREE.PlaneGeometry(0.35,3.0),lM);
+                    leaf.position.set(px+Math.cos(a)*1.2,5.9,pz+Math.sin(a)*1.2);
+                    leaf.rotation.set(-0.5,a,0.2); scene.add(leaf);
+                }
+            }
+            [[-7,EZ+12],[7,EZ+14],[-4,EZ+20],[12,EZ+18],[-20,EZ+22],[22,EZ+24],[-35,EZ+18],[35,EZ+15]].forEach(([x,z])=>palm(x,z));
+
+            // ── CAMELS ──
+            function camel(px,pz){
+                const cM=new THREE.MeshStandardMaterial({color:0x9A6428,roughness:0.9});
+                const body=new THREE.Mesh(new THREE.BoxGeometry(1.6,0.9,3.0),cM);
+                body.position.set(px,1.15,pz); scene.add(body);
+                const hump=new THREE.Mesh(new THREE.SphereGeometry(0.52,8,6),cM);
+                hump.scale.y=1.35; hump.position.set(px,2.0,pz); scene.add(hump);
+                const neck=new THREE.Mesh(new THREE.CylinderGeometry(0.14,0.2,1.2,6),cM);
+                neck.rotation.z=0.38; neck.position.set(px+0.65,1.85,pz-1.1); scene.add(neck);
+                const head=new THREE.Mesh(new THREE.BoxGeometry(0.45,0.42,0.72),cM);
+                head.position.set(px+1.15,2.45,pz-1.1); scene.add(head);
+                [[-0.45,0.45],[-0.45,-0.45],[0.45,0.45],[0.45,-0.45]].forEach(([lx,lz2])=>{
+                    const leg=new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.1,1.1,5),cM);
+                    leg.position.set(px+lx,0.25,pz+lz2); scene.add(leg);
+                });
+            }
+            camel(10, EZ+22); camel(15, EZ+26); camel(-12, EZ+30); camel(-8, EZ+40);
+
+            // ── LIGHTING ──
+            const sunLight=new THREE.DirectionalLight(0xFFE090,4.0);
+            sunLight.position.set(50,80,EZ+20); scene.add(sunLight);
+            const skyAmb=new THREE.HemisphereLight(0x88BBFF,0xC8A040,2.0);
+            scene.add(skyAmb);
+        }
+
         function buildLever() {
+            // Lever sits ON TOP of the front-right pod at (x=6, y=0.5, z=-12), top at y≈1.0
+            // The group is oriented so +z axis points toward the centre of the room (-x direction)
             const leverGroup = new THREE.Group();
-            leverGroup.position.set(-7.5, 1.2, -17);
-            leverGroup.visible = false;
+            leverGroup.position.set(6, 1.0, -12); // on top of front-right pod (what you call Station 4)
+            leverGroup.rotation.y = -Math.PI / 2; // face toward centre of room
             scene.add(leverGroup);
 
-            const stoneMat = new THREE.MeshStandardMaterial({ color: 0x7A6A50, roughness: 0.9 });
-            const metalMat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.5, metalness: 0.8 });
+            // Stone backplate (flat against wall)
+            const plateMat = new THREE.MeshStandardMaterial({color: 0x5A3410, roughness: 0.9, emissive: 0x2A1400, emissiveIntensity: 0.6});
+            const plate = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.0, 0.1), plateMat);
+            plate.position.set(0, 0, 0.05); leverGroup.add(plate);
 
-            // Wall bracket
-            const bracket = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.25, 0.2), stoneMat);
-            bracket.position.set(0, 0, 0);
-            leverGroup.add(bracket);
+            // Gold bracket protruding from plate
+            const bracketMat = new THREE.MeshStandardMaterial({color: 0xDAA520, metalness: 0.8, roughness: 0.25, emissive: 0x6A3A00, emissiveIntensity: 0.6});
+            const bracket = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.25, 0.18), bracketMat);
+            bracket.position.set(0, 0, 0.18); leverGroup.add(bracket);
 
-            // Lever arm (this is what you grab and pull)
-            leverArm = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.5, 0.08), metalMat);
-            leverArm.position.set(0, 0.3, 0.1);
-            leverArm.name = 'leverArm';
+            // Lever arm — pivots at bracket, starts pointing UP
+            leverArm = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.035, 0.035, 0.7, 10),
+                new THREE.MeshStandardMaterial({color: 0x3A1A06, roughness: 0.8})
+            );
+            // Position arm so its bottom sits at the bracket
+            leverArm.position.set(0, 0.35, 0.25);
             leverArm.userData.type = 'lever';
+            leverArm.userData.group = leverGroup;
             leverGroup.add(leverArm);
 
-            // Glow light on lever
-            const leverLight = new THREE.PointLight(0xFFAA00, 1.5, 3);
-            leverLight.position.set(0, 0.3, 0);
-            leverGroup.add(leverLight);
+            // Gold knob at top
+            const knob = new THREE.Mesh(new THREE.SphereGeometry(0.12, 12, 10), bracketMat);
+            knob.position.set(0, 0.72, 0.25);
+            knob.userData.type = 'lever'; // also clickable
+            leverGroup.add(knob);
+            leverArm.userData.knob = knob;
 
             leverObjects.push(leverArm);
             grabbableObjects.push(leverArm);
+            grabbableObjects.push(knob); // click the knob too
+            // Also make the whole plate clickable as a large target
+            plate.userData.type = 'lever';
+            grabbableObjects.push(plate);
 
-            // Label
-            makeTextPanel('PULL TO ESCAPE', -7.5, 2.2, -17, 0.7, 0.25);
+            // Glowing indicator light — RED when not pulled, GREEN when pulled (visual feedback)
+            const leverLight = new THREE.PointLight(0xFF2020, 5.0, 6);
+            leverLight.position.set(0, 0, 0.5);
+            leverGroup.add(leverLight);
+            leverArm.userData.light = leverLight;
 
-            // Store reference to group for showing/hiding
-            leverArm.userData.group = leverGroup;
         }
 
-        // -------------------------------------------------------------------
-        // CONTROLLER SELECT START
-        // -------------------------------------------------------------------
         function onSelectStart(event) {
             const controller = event.target;
             raycaster.setFromXRController(controller);
-
-            // Check scroll pieces (station 1)
-            if (!station1Solved) {
-                const hits = raycaster.intersectObjects(scrollPieces);
-                if (hits.length > 0) {
-                    const piece = hits[0].object;
-                    if (!scrollSolved.has(piece.name)) {
-                        controller.attach(piece);
-                        controller.userData.selected = piece;
-                        controller.userData.selectedType = 'scroll';
-                        return;
-                    }
-                }
-            }
-
-            // Check weight objects (station 2)
-            if (station1Solved && !station2Solved) {
-                const hits = raycaster.intersectObjects(scaleObjects);
-                if (hits.length > 0) {
-                    const obj = hits[0].object;
-                    if (!obj.userData.onScale) {
-                        controller.attach(obj);
-                        controller.userData.selected = obj;
-                        controller.userData.selectedType = 'weight';
-                        obj.material.emissiveIntensity = 0.7;
-                        return;
-                    }
-                }
-            }
-
-            // Check counter buttons (station 3)
-            if (station2Solved && !station3Solved) {
-                const hits = raycaster.intersectObjects(counterButtons);
-                if (hits.length > 0) {
-                    const btn = hits[0].object;
-                    const type = btn.userData.glyphType;
-                    if (btn.userData.action === 'plus') {
-                        playerInput[type] = Math.min(playerInput[type] + 1, 15);
-                    } else {
-                        playerInput[type] = Math.max(playerInput[type] - 1, 0);
-                    }
-                    updateCounterDisplay(type);
-                    checkStation3Answer();
-                    return;
-                }
-            }
-
-            // Check lever (finale)
-            if (leverActive && !leverPulled) {
-                const hits = raycaster.intersectObjects(leverObjects);
-                if (hits.length > 0) {
-                    leverPulled = true;
-                    animateLever();
-                }
-            }
-
-            // Fallback generic grab for other grabbable objects
             const hits = raycaster.intersectObjects(grabbableObjects, true);
             if (hits.length > 0) {
                 const object = hits[0].object;
-                if (object.material && object.material.emissive) {
-                    object.material.emissive = new THREE.Color(0x0044ff);
-                    object.material.emissiveIntensity = 0.4;
+                // Lever: pull it down instead of attaching
+                let leverObj = object;
+                while (leverObj && !leverObj.userData.type) leverObj = leverObj.parent;
+                if (leverObj && leverObj.userData.type === 'lever') {
+                    scene.userData.leverPulled = true;
+                    scene.userData.leverT = 0;
+                    console.log('Lever pulled! (VR controller)');
+                    return;
                 }
                 controller.attach(object);
                 controller.userData.selected = object;
+                if(object.userData.type === 'scrollPiece') controller.userData.selectedType = 'scroll';
+                if(object.userData.type === 'weight') controller.userData.selectedType = 'weight';
             }
         }
 
-        // -------------------------------------------------------------------
-        // CONTROLLER SELECT END
-        // -------------------------------------------------------------------
         function onSelectEnd(event) {
             const controller = event.target;
             const obj = controller.userData.selected;
             if (!obj) return;
-
-            scene.attach(obj); // return to world space
-
+            scene.attach(obj);
             const type = controller.userData.selectedType;
-
-            // --- Drop scroll piece: check snap ---
             if (type === 'scroll') {
                 const target = scrollSnapTargets[obj.name];
-                if (target && obj.position.distanceTo(target) < 0.25) {
+                if (target && obj.position.distanceTo(target) < 0.3) {
                     obj.position.copy(target);
                     obj.rotation.set(-Math.PI / 2, 0, 0);
                     scrollSolved.add(obj.name);
-                    obj.material.color.set(0xFFD700); // flash gold on snap
                     if (scrollSolved.size === 4) solveStation1();
                 }
             }
-
-            // --- Drop weight: check if over right pan ---
-            if (type === 'weight' && !obj.userData.onScale) {
-                const panWorldPos = new THREE.Vector3();
-                scalePanRight.getWorldPosition(panWorldPos);
-                if (obj.position.distanceTo(panWorldPos) < 0.3) {
-                    obj.userData.onScale = true;
-                    rightPanMass += obj.userData.mass;
-                    // Stack it on the pan
-                    obj.position.set(panWorldPos.x, panWorldPos.y + 0.06 + rightPanMass * 0.03, panWorldPos.z);
-                    obj.material.emissiveIntensity = 0;
-                    updateScaleVisual();
-                    checkStation2Balance();
-                }
-            }
-
-            if (obj.material && obj.material.emissive && type !== 'scroll') {
-                obj.material.emissiveIntensity = 0;
-            }
-
             controller.userData.selected = undefined;
-            controller.userData.selectedType = undefined;
         }
 
-        // -------------------------------------------------------------------
-        // STATION 1 SOLVED
-        // -------------------------------------------------------------------
         function solveStation1() {
             station1Solved = true;
-            console.log('Station 1 solved!');
-
-            // Show clue panel above the assembled scroll
-            const canvas = document.createElement('canvas');
-            canvas.width = 320; canvas.height = 160;
-            const ctx = canvas.getContext('2d');
-            ctx.fillStyle = '#1a0800';
-            ctx.fillRect(0, 0, 320, 160);
-            ctx.fillStyle = '#FFD700';
-            ctx.font = 'bold 22px serif';
-            ctx.textAlign = 'center';
-            ctx.fillText('BALANCE THE SCALES', 160, 40);
-            ctx.font = '16px serif';
-            ctx.fillStyle = '#D4A96A';
-            ctx.fillText('The scarab sits on the left.', 160, 80);
-            ctx.fillText('Place the ANKH on the right.', 160, 108);
-            ctx.fillText('⬅  Walk to Station 2  ➡', 160, 140);
-
-            const clue = new THREE.Mesh(
-                new THREE.PlaneGeometry(0.9, 0.45),
-                new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true })
-            );
-            clue.position.set(-5, 1.55, -16.99);
-            clue.rotation.x = -0.2;
-            scene.add(clue);
-
-            // Light up station 2
             const s2Light = scene.getObjectByName('station2Light');
-            if (s2Light) s2Light.intensity = 2.5;
-
-            // Make weight objects grabbable now (they were always in scene)
-            console.log('Station 2 unlocked — grab the ANKH and balance the scale!');
+            if (s2Light) s2Light.intensity = 4.5;
         }
 
-        // -------------------------------------------------------------------
-        // STATION 2 — SCALE VISUAL UPDATE & SOLVE CHECK
-        // -------------------------------------------------------------------
-        function updateScaleVisual() {
-            const diff = rightPanMass - leftPanMass;
-            // Tilt the beam based on weight difference (clamped)
-            const tilt = THREE.MathUtils.clamp(diff * 0.25, -0.4, 0.4);
-            scaleBeamMesh.rotation.z = tilt;
-
-            // Move pans to follow beam ends
-            const beamPos = new THREE.Vector3();
-            scaleBeamMesh.getWorldPosition(beamPos);
-            scalePanLeft.position.y  = 1.38 - Math.sin(tilt) * 0.42;
-            scalePanRight.position.y = 1.38 + Math.sin(tilt) * 0.42;
-        }
-
-        function checkStation2Balance() {
-            if (Math.abs(rightPanMass - leftPanMass) < 0.05) {
-                setTimeout(() => solveStation2(), 600);
-            }
-        }
-
-        function solveStation2() {
-            station2Solved = true;
-            console.log('Station 2 solved!');
-
-            // Flash scale gold
-            scaleBeamMesh.material.emissive = new THREE.Color(0xFFAA00);
-            scaleBeamMesh.material.emissiveIntensity = 0.8;
-
-            // Show clue and light up station 3
-            makeTextPanel('BALANCED!\nNow count the glyphs\nat Station 3  →', 0, 2.6, -22, 0.85, 0.5);
-
-            const s3Light = scene.getObjectByName('station3Light');
-            if (s3Light) s3Light.intensity = 2.5;
-
-            // Slide the station 3 frame out of the wall
-            station3Frame.visible = true;
-            let t = 0;
-            const slide = setInterval(() => {
-                t += 0.04;
-                station3Frame.position.x = 7.5 - t * 1.5;
-                if (station3Frame.position.x <= 6.0) {
-                    station3Frame.position.x = 6.0;
-                    clearInterval(slide);
-                }
-            }, 16);
-        }
-
-        // -------------------------------------------------------------------
-        // STATION 3 — COUNTER DISPLAY & SOLVE CHECK
-        // -------------------------------------------------------------------
-        function updateCounterDisplay(type) {
-            const display = station3Frame.getObjectByName(`display_${type}`);
-            if (!display) return;
-            const symbols = { sun: '☀', star: '★', snake: '〜' };
-            const canvas = document.createElement('canvas');
-            canvas.width = 200; canvas.height = 60;
-            const ctx = canvas.getContext('2d');
-            ctx.fillStyle = '#2a1500';
-            ctx.fillRect(0, 0, 200, 60);
-            ctx.fillStyle = '#D4A96A';
-            ctx.font = 'bold 26px serif';
-            ctx.textAlign = 'left';
-            ctx.fillText(`${symbols[type]}  ${type}: ${playerInput[type]}`, 8, 42);
-            display.material.map = new THREE.CanvasTexture(canvas);
-            display.material.needsUpdate = true;
-        }
-
-        function checkStation3Answer() {
-            const correct = Object.keys(ANSWER).every(t => playerInput[t] === ANSWER[t]);
-            if (correct) setTimeout(() => solveStation3(), 400);
-        }
-
-        function solveStation3() {
-            station3Solved = true;
-            console.log('Station 3 solved!');
-
-            // Flash frame gold
-            station3Frame.traverse(child => {
-                if (child.isMesh && child.material.color) {
-                    if (child.material.color.getHex() === 0x116611 || child.material.color.getHex() === 0x881111) {
-                        child.material.color.set(0xFFD700);
-                    }
-                }
-            });
-
-            makeTextPanel('CORRECT!\nPull the lever\non the left wall  ←', 5, 2.6, -17, 0.85, 0.5);
-
-            // Show the lever
-            leverActive = true;
-            leverArm.userData.group.visible = true;
-
-            // Light up lever area
-            const leverLight = new THREE.PointLight(0xFFAA00, 2, 5);
-            leverLight.position.set(-7.5, 2.5, -17);
-            scene.add(leverLight);
-        }
-
-        // -------------------------------------------------------------------
-        // LEVER ANIMATION & FINALE
-        // -------------------------------------------------------------------
-        function animateLever() {
-            let angle = 0;
-            const pull = setInterval(() => {
-                angle += 0.03;
-                leverArm.rotation.x = angle;
-                if (angle >= Math.PI / 2.2) {
-                    clearInterval(pull);
-                    setTimeout(triggerFinale, 500);
-                }
-            }, 16);
-        }
-
-        function triggerFinale() {
-            console.log('ESCAPED!');
-
-            // Swap 360 sphere background (or scene background) to desert
-            scene.background = new THREE.Color(0xE8C87A); // warm desert color fallback
-
-            // Load desert texture if available
-            new THREE.TextureLoader().load('textures/dessert_360.jpg', (tex) => {
-                scene.background = tex; // simple background swap
-            });
-
-            // Open the back wall — animate it sinking
-            scene.traverse(obj => {
-                if (obj.isMesh) {
-                    const pos = obj.position;
-                    // Find the back wall (z ≈ -25)
-                    if (Math.abs(pos.z + 25) < 0.5 && Math.abs(pos.y - 2.3) < 0.5) {
-                        const sink = setInterval(() => {
-                            obj.position.y -= 0.04;
-                            if (obj.position.y < -3) clearInterval(sink);
-                        }, 16);
-                    }
-                }
-            });
-
-            // Victory panel
-            const canvas = document.createElement('canvas');
-            canvas.width = 512; canvas.height = 256;
-            const ctx = canvas.getContext('2d');
-            ctx.fillStyle = '#000000';
-            ctx.fillRect(0, 0, 512, 256);
-            ctx.fillStyle = '#FFD700';
-            ctx.font = 'bold 52px serif';
-            ctx.textAlign = 'center';
-            ctx.fillText('YOU ESCAPED!', 256, 90);
-            ctx.font = '26px serif';
-            ctx.fillStyle = '#D4A96A';
-            ctx.fillText('Khepri is pleased.', 256, 148);
-            ctx.fillText('The desert awaits.', 256, 188);
-
-            const panel = new THREE.Mesh(
-                new THREE.PlaneGeometry(3, 1.5),
-                new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true })
-            );
-            panel.position.set(0, 2.5, -20);
-            scene.add(panel);
-
-            // Flood the room with warm light
-            const winLight = new THREE.PointLight(0xFFDD88, 3, 30);
-            winLight.position.set(0, 4, -17);
-            scene.add(winLight);
-        }
-
-        // -------------------------------------------------------------------
-        // HOVER HIGHLIGHT
-        // -------------------------------------------------------------------
-        function updateHover() {
-            while (intersected.length) {
-                const obj = intersected.pop();
-                if (obj.material && obj.material.emissive && !obj.userData.grabbed) {
-                    obj.material.emissive = new THREE.Color(0x000000);
-                    obj.material.emissiveIntensity = 0;
-                }
-            }
-
-            [controller1, controller2].forEach(ctrl => {
-                if (ctrl.userData.selected) return;
-                raycaster.setFromXRController(ctrl);
-                const targets = [...scrollPieces, ...scaleObjects, ...counterButtons, ...leverObjects];
-                const hits = raycaster.intersectObjects(targets, true);
-                const line = ctrl.getObjectByName('line');
-
-                if (hits.length > 0) {
-                    const obj = hits[0].object;
-                    if (obj.material && obj.material.emissive) {
-                        obj.material.emissive = new THREE.Color(0xff4400);
-                        obj.material.emissiveIntensity = 0.5;
-                        intersected.push(obj);
-                    }
-                    if (line) line.scale.z = hits[0].distance;
-                } else {
-                    if (line) line.scale.z = 5;
-                }
-            });
-        }
-
-        // -------------------------------------------------------------------
-        // HELPERS
-        // -------------------------------------------------------------------
         function addBox(x, y, z, w, h, d, mat) {
             const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
             mesh.position.set(x, y, z);
+            mesh.receiveShadow = true;
             scene.add(mesh);
             return mesh;
         }
 
-        function addBoxTo(group, x, y, z, w, h, d, mat) {
-            const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-            mesh.position.set(x, y, z);
-            group.add(mesh);
-            return mesh;
-        }
-
         function makeTextPanel(text, x, y, z, w, h) {
-            const lines = text.split('\n');
             const canvas = document.createElement('canvas');
             canvas.width = 512; canvas.height = 256;
             const ctx = canvas.getContext('2d');
@@ -972,40 +1322,12 @@
             ctx.fillStyle = '#FFD700';
             ctx.font = 'bold 36px serif';
             ctx.textAlign = 'center';
-            lines.forEach((line, i) => {
-                const fontSize = i === 0 ? 36 : 26;
-                ctx.font = `${i === 0 ? 'bold' : 'normal'} ${fontSize}px serif`;
-                ctx.fillStyle = i === 0 ? '#FFD700' : '#D4A96A';
-                ctx.fillText(line, 256, 60 + i * 56);
-            });
-            const mesh = new THREE.Mesh(
-                new THREE.PlaneGeometry(w, h),
-                new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true })
-            );
+            ctx.fillText(text.split('\n')[0], 256, 100);
+            const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true }));
             mesh.position.set(x, y, z);
             scene.add(mesh);
-            return mesh;
         }
 
-        function makeCanvasLabel(text, w, h, color) {
-            const canvas = document.createElement('canvas');
-            canvas.width = w; canvas.height = h;
-            const ctx = canvas.getContext('2d');
-            ctx.fillStyle = '#2a1500';
-            ctx.fillRect(0, 0, w, h);
-            ctx.fillStyle = color;
-            ctx.font = 'bold 26px serif';
-            ctx.textAlign = 'left';
-            ctx.fillText(text, 8, 42);
-            return new THREE.Mesh(
-                new THREE.PlaneGeometry(1, 1),
-                new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true })
-            );
-        }
-
-        // -------------------------------------------------------------------
-        // TORCH HELPERS
-        // -------------------------------------------------------------------
         function placeTorch(parent, x, y, z, lightIntensity = 1.5) {
             if (!torchTemplate) {
                 pendingTorchPlacements.push({ parent, x, y, z, lightIntensity });
@@ -1013,30 +1335,27 @@
             }
             const torch = torchTemplate.clone();
             torch.position.set(x, y, z);
-            if (x < 0) torch.rotation.y =  Math.PI / 2;
-            if (x > 0) torch.rotation.y = -Math.PI / 2;
             parent.add(torch);
 
-            const flameMat = new THREE.MeshStandardMaterial({
-                color: 0xFF6600,
-                emissive: new THREE.Color(0xFF4400),
-                emissiveIntensity: 1.0
-            });
-            const flame = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 8), flameMat);
-            flame.position.set(x, y + 0.3, z);
-            parent.add(flame);
-
-            const light = new THREE.PointLight(0xff5500, lightIntensity, 6);
-            light.position.set(x, y + 0.35, z);
+            // Main warm torch light
+            const light = new THREE.PointLight(0xFF5500, lightIntensity, 14);
+            light.position.set(x, y + 0.4, z);
+            light.castShadow = true;
+            light.shadow.mapSize.width  = 256;
+            light.shadow.mapSize.height = 256;
             parent.add(light);
+
+            // Secondary subtle fill — slightly cooler colour for depth
+            const fill = new THREE.PointLight(0xFF2200, lightIntensity * 0.35, 8);
+            fill.position.set(x, y + 0.1, z);
+            parent.add(fill);
+
+            // Register both for flicker with individual random phase offset
+            torchLights.push({ light, fill, baseIntensity: lightIntensity, phase: Math.random() * Math.PI * 2 });
         }
 
         function spawnTorch(parent, x, y, z) { placeTorch(parent, x, y, z, 1.5); }
-        function spawnTorchTo(group, x, y, z, dark = false) { placeTorch(group, x, y, z, dark ? 0 : 1.5); }
 
-        // -------------------------------------------------------------------
-        // KEYBOARD (WASD for desktop testing)
-        // -------------------------------------------------------------------
         function handleKeyboard() {
             const delta = 1 / 60;
             const speed = 3.0;
@@ -1045,46 +1364,36 @@
             forward.y = 0; forward.normalize();
             const right = new THREE.Vector3();
             right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
-
-            if (keys['w'] || keys['arrowup'])    cameraRig.position.addScaledVector(forward,  speed * delta);
-            if (keys['s'] || keys['arrowdown'])  cameraRig.position.addScaledVector(forward, -speed * delta);
-            if (keys['a'] || keys['arrowleft'])  cameraRig.position.addScaledVector(right,   -speed * delta);
-            if (keys['d'] || keys['arrowright']) cameraRig.position.addScaledVector(right,    speed * delta);
-            if (keys['q']) cameraRig.rotation.y += 0.02;
-            if (keys['e']) cameraRig.rotation.y -= 0.02;
-
-            // Test shortcuts
-            if (keys['1']) { solveStation1(); keys['1'] = false; }
-            if (keys['2']) { if (station1Solved) solveStation2(); keys['2'] = false; }
-            if (keys['3']) { if (station2Solved) solveStation3(); keys['3'] = false; }
+            if (keys['w']) cameraRig.position.addScaledVector(forward,  speed * delta);
+            if (keys['s']) cameraRig.position.addScaledVector(forward, -speed * delta);
+            if (keys['a']) cameraRig.position.addScaledVector(right,   -speed * delta);
+            if (keys['d']) cameraRig.position.addScaledVector(right,    speed * delta);
+            // Press E or SPACE to pull the lever (desktop fallback)
+            if ((keys['e'] || keys[' ']) && !scene.userData.leverPulled) {
+                scene.userData.leverPulled = true;
+                scene.userData.leverT = 0;
+                console.log('Lever pulled! (keyboard E/SPACE)');
+            }
         }
 
-        // -------------------------------------------------------------------
-        // SMOOTH VR LOCOMOTION
-        // -------------------------------------------------------------------
         function handleLocomotion() {
             const session = renderer.xr.getSession();
             if (!session) return;
             const delta = 1 / 72;
-
             for (const source of session.inputSources) {
                 if (!source.gamepad) continue;
                 const axes = source.gamepad.axes;
-
                 if (source.handedness === 'left') {
                     const moveX = axes[2] ?? 0;
                     const moveZ = axes[3] ?? 0;
-                    if (Math.abs(moveX) > 0.1 || Math.abs(moveZ) > 0.1) {
-                        const forward = new THREE.Vector3();
-                        camera.getWorldDirection(forward);
-                        forward.y = 0; forward.normalize();
-                        const right = new THREE.Vector3();
-                        right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
-                        cameraRig.position.addScaledVector(forward, -moveZ * moveSpeed * delta);
-                        cameraRig.position.addScaledVector(right,    moveX * moveSpeed * delta);
-                    }
+                    const forward = new THREE.Vector3();
+                    camera.getWorldDirection(forward);
+                    forward.y = 0; forward.normalize();
+                    const right = new THREE.Vector3();
+                    right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+                    cameraRig.position.addScaledVector(forward, -moveZ * moveSpeed * delta);
+                    cameraRig.position.addScaledVector(right,    moveX * moveSpeed * delta);
                 }
-
                 if (source.handedness === 'right') {
                     const rotX = axes[2] ?? 0;
                     if (rotX > 0.7 && canSnapRight) { cameraRig.rotation.y -= snapAngle; canSnapRight = false; }
@@ -1094,22 +1403,95 @@
             }
         }
 
-        // -------------------------------------------------------------------
-        // WINDOW RESIZE
-        // -------------------------------------------------------------------
         function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
-        // -------------------------------------------------------------------
-        // ANIMATE LOOP
-        // -------------------------------------------------------------------
         function animate() {
             handleKeyboard();
             handleLocomotion();
-            updateHover();
+
+            // === TORCH FLICKER ===
+            const t = performance.now() * 0.001; // seconds
+            torchLights.forEach(({ light, fill, baseIntensity, phase }) => {
+                // Layered sin waves at different frequencies = organic flicker
+                const flicker =
+                    Math.sin(t * 7.3  + phase)        * 0.18 +
+                    Math.sin(t * 13.7 + phase * 1.3)  * 0.10 +
+                    Math.sin(t * 3.1  + phase * 0.7)  * 0.08 +
+                    Math.random()                      * 0.06; // tiny random spike
+                light.intensity = Math.max(0, baseIntensity * (1.0 + flicker));
+                fill.intensity  = Math.max(0, baseIntensity * 0.35 * (1.0 + flicker * 0.5));
+
+                // Slight colour temperature shift — flicker between orange and deep amber
+                const r = Math.min(1, 1.0);
+                const g = Math.max(0.18, 0.30 + flicker * 0.15);
+                light.color.setRGB(r, g, 0.02);
+            });
+
+            // === COLLISION: block player from walking through closed door ===
+            // Check if door is lifted enough to walk under (lift > 2.5 means door is mostly up)
+            if (scene.userData.DOOR_Z !== undefined) {
+                const doorLift = scene.userData.doorSlab ? (scene.userData.doorSlab.position.y - scene.userData.doorSlab.userData.closedY) : 0;
+                if (doorLift < 2.5 && cameraRig.position.z > scene.userData.DOOR_Z - 0.5) {
+                    cameraRig.position.z = scene.userData.DOOR_Z - 0.5;
+                }
+            }
+
+            // === LEVER ANIMATION ===
+            if (scene.userData.leverPulled && leverArm && (scene.userData.leverT || 0) < 1) {
+                scene.userData.leverT = Math.min(1, (scene.userData.leverT || 0) + 0.025);
+                const lt = scene.userData.leverT;
+                const angle = lt * Math.PI * 0.5;
+                // Arm pivots from its BASE (bracket), which is at local y=0, z=0.25
+                // Move arm so its base is at local y=0 then rotate, then reposition
+                const L = 0.35; // half-arm length
+                leverArm.position.set(0, L * Math.cos(angle), 0.25 + L * Math.sin(angle));
+                leverArm.rotation.x = angle;
+                // Knob follows the top of the arm
+                if (leverArm.userData.knob) {
+                    leverArm.userData.knob.position.set(
+                        0,
+                        (2 * L) * Math.cos(angle),
+                        0.25 + (2 * L) * Math.sin(angle)
+                    );
+                }
+                // Switch indicator light from red to green
+                if (leverArm.userData.light) {
+                    leverArm.userData.light.color.setHex(0x20FF20);
+                }
+            }
+
+            // === BACKGROUND: show Egypt sky once lever is pulled (door opening = sky visible) ===
+            if (scene.userData.egyptStartZ !== undefined) {
+                if (scene.userData.leverPulled) {
+                    // Lever pulled → door opening → show Egypt sky
+                    scene.fog = null;
+                    scene.background = scene.userData.egyptBg || new THREE.Color(0x4A9AE8);
+                } else {
+                    // Still locked in tomb
+                    if (!scene.fog) scene.fog = new THREE.FogExp2(0x0A0402, 0.018);
+                    scene.background = scene.userData.tombBg || new THREE.Color(0x0A0402);
+                }
+            }
+
+            // === DOOR ANIMATION — slab slides UP when lever pulled (portcullis) ===
+            if (scene.userData.doorSlab) {
+                if (scene.userData.leverPulled && !scene.userData.doorOpen) {
+                    scene.userData.doorOpen = true;
+                }
+                if (scene.userData.doorOpen && scene.userData.doorT < 1) {
+                    scene.userData.doorT = Math.min(1, scene.userData.doorT + 0.018);
+                    const t = scene.userData.doorT;
+                    // Ease-out for smooth stop at top
+                    const ease = 1 - Math.pow(1 - t, 2);
+                    const lift = ease * 4.0; // total lift distance
+                    scene.userData.doorSlab.position.y = scene.userData.doorSlab.userData.closedY + lift;
+                }
+            }
+
             renderer.render(scene, camera);
         }
 

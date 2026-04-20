@@ -1,0 +1,11 @@
+Model Information:
+* title:	Cat egypt
+* source:	https://sketchfab.com/3d-models/cat-egypt-451b471a2bfa4108839e2d4f167a67c8
+* author:	Sobrom (https://sketchfab.com/Sobrom)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Cat egypt" (https://sketchfab.com/3d-models/cat-egypt-451b471a2bfa4108839e2d4f167a67c8) by Sobrom (https://sketchfab.com/Sobrom) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
