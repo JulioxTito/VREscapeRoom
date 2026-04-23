@@ -11,6 +11,8 @@
 </head>
 
 <body>
+    <audio id="bgMusic" src="Assets/audio/tomb_music.mp3" loop></audio>
+
     <script type="importmap">
         {
             "imports": {
@@ -115,6 +117,19 @@
             // Moderate fog — room stays visible but far end fades naturally
             scene.fog = new THREE.FogExp2(0x0A0402, 0.018); // reduced — exterior needs visibility 
 
+            // Background music — starts on first user interaction (browsers block autoplay)
+            const bgMusic = document.getElementById('bgMusic');
+            if (bgMusic) {
+                bgMusic.volume = 0.3; // 30% volume — change to adjust loudness (0.0 to 1.0)
+                const startMusic = () => bgMusic.play().catch(() => {});
+                document.addEventListener('click', startMusic, { once: true });
+                document.addEventListener('keydown', startMusic, { once: true });
+                // VR session also counts as interaction
+                if (window.addEventListener) {
+                    window.addEventListener('touchstart', startMusic, { once: true });
+                }
+            }
+
             cameraRig = new THREE.Group();
             cameraRig.position.set(0, 0, -10); 
             scene.add(cameraRig);
@@ -210,17 +225,17 @@
         }
 
         function buildCorridor() {
-            const stoneMat = new THREE.MeshStandardMaterial({ color: 0x6B3A1F, roughness: 1.0 });
-            const darkMat  = new THREE.MeshStandardMaterial({ color: 0x3D1F08, roughness: 1.0 });
-            const wallMat3 = new THREE.MeshStandardMaterial({ color: 0x4A2D18, roughness: 0.9 });
+            // Match tomb room materials exactly
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x3D2515, roughness: 0.95 });
+            const wallMat  = new THREE.MeshStandardMaterial({ color: 0x4A2D18, roughness: 0.9  });
+            const ceilMat  = new THREE.MeshStandardMaterial({ color: 0x150A04, roughness: 1.0  });
 
             // Corridor box: z range [-9 to +7], width 4 (x: -2 to +2), height 3.5
-            // Floor & ceiling — extended to cover DOOR_Z area
-            addBox(0, -0.1, -1, 4, 0.2, 16, darkMat);       // floor (z:-9 to +7)
-            addBox(0,  3.6, -1, 4, 0.2, 16, darkMat);       // ceiling
-            // Side walls — FULL LENGTH to match, using stone material
-            addBox(-2, 1.75, -1, 0.2, 3.5, 16, stoneMat);   // left wall
-            addBox( 2, 1.75, -1, 0.2, 3.5, 16, stoneMat);   // right wall
+            addBox(0, -0.1, -1, 4, 0.2, 16, floorMat);      // floor — same as tomb
+            addBox(0,  3.6, -1, 4, 0.2, 16, ceilMat);       // ceiling — same as tomb
+            // Side walls — same as tomb walls
+            addBox(-2, 1.75, -1, 0.2, 3.5, 16, wallMat);
+            addBox( 2, 1.75, -1, 0.2, 3.5, 16, wallMat);
 
             // Corridor ends at z=+7.5 — door at z=+6.2 seals it when closed
             // (no end-cap wall here; the door + stone panels in buildEgyptExit do the sealing)
@@ -235,45 +250,63 @@
 
         function buildTombRoom() {
             // Stone materials — warm brownish-red like the reference
-            const floorMat   = new THREE.MeshStandardMaterial({ color: 0x3D2515, roughness: 0.95 });
+            const floorMat   = new THREE.MeshStandardMaterial({ color: 0x080400, roughness: 1.0, metalness: 0 });  // match ceiling darkness
             const wallMat    = new THREE.MeshStandardMaterial({ color: 0x4A2D18, roughness: 0.9  });
-            const ceilMat    = new THREE.MeshStandardMaterial({ color: 0x150A04, roughness: 1.0  });
+            const ceilMat    = new THREE.MeshStandardMaterial({ color: 0x080400, roughness: 1.0, metalness: 0 });
             const backWallMat = new THREE.MeshStandardMaterial({ color: 0x5A3520, roughness: 0.85, emissive: 0x3A1A08, emissiveIntensity: 0.4 });
             const exteriorMat = new THREE.MeshStandardMaterial({ color: 0x8B6020, roughness: 1.0 }); // sandstone outside
 
-            // ── EXTERIOR: T-shape sandstone mastaba (like the sketch) ──
-            // Uses BackSide so it doesn't render over the interior
-            const sandstoneExt = new THREE.MeshStandardMaterial({
-                color: 0xC89050, roughness: 1.0, side: THREE.BackSide
-            });
+            // ── Exterior: solid sandstone building that wraps both tomb and corridor ──
+            // Use a SINGLE wide box shape so there are no gaps/edges between tomb and corridor.
+            // We build exterior walls around the PERIMETER of the combined shape (tomb + corridor T).
+            const extMat = new THREE.MeshStandardMaterial({ color: 0xC89040, roughness: 1.0 });
 
-            // Main tomb block (the wider back part): tomb interior is x±9, z:-7 to -27
-            // Make exterior slightly larger: x±11, z:-6 to -28, height 6.5
-            const tombBlock = new THREE.Mesh(
-                new THREE.BoxGeometry(22, 6.5, 22),
-                sandstoneExt
-            );
-            tombBlock.position.set(0, 3.25, -17);
-            scene.add(tombBlock);
+            // Tomb outline: x[-9, 9], z[-27, -9]  (the wider back block)
+            // Corridor outline: x[-2, 2], z[-9, 7]  (narrow passage forward)
+            // Common roof: use tomb height 5.6 everywhere for a uniform building height
 
-            // Narrow corridor block sticking out in front (the vertical bar of the T-shape)
-            // Corridor interior is x±2, z:+7.5 to -7. Exterior x±3.5, z:+8 to -7.5, height 4.5
-            const corridorBlock = new THREE.Mesh(
-                new THREE.BoxGeometry(7, 4.5, 15.5),
-                sandstoneExt
-            );
-            corridorBlock.position.set(0, 2.25, 0.25);
-            scene.add(corridorBlock);
+            // === Unified exterior building (tomb + corridor T-shape) ===
+            // Build as ONE continuous outer shell, all walls aligned perfectly to avoid edges.
+            // Tomb: x[-9.2, 9.2], z[-27.2, -9]
+            // Corridor: x[-2.2, 2.2], z[-9, 7.1]
+            // Where corridor meets tomb (at z=-9), the corridor walls must EXTEND INTO the tomb
+            // wall plane so there's no gap, and tomb's front wall ENDS exactly at corridor edges.
 
-            // Decorative stone blocks at the 4 corners of the tomb (solid, visible from all sides)
-            const cornerMat = new THREE.MeshStandardMaterial({color:0xA07530, roughness:1});
-            [[-11.5,-6.5],[11.5,-6.5],[-11.5,-27.5],[11.5,-27.5]].forEach(([x,z])=>{
-                for(let i=0;i<4;i++){
-                    const blk = new THREE.Mesh(new THREE.BoxGeometry(1.5,0.6,1.5), cornerMat);
-                    blk.position.set(x, 0.3+i*0.6, z);
-                    scene.add(blk);
-                }
-            });
+            const EXT_H = 5.6;        // exterior height
+            const EXT_YC = EXT_H/2;    // y centre = 2.8
+            const WT = 0.8;            // wall thickness — thicker so there are NO gaps
+
+            // === Tomb exterior: x[-9.2, 9.2], z[-9, -27.2] ===
+            // Interior side walls span z=-7 to z=-27. Exterior must cover FULL span.
+            // Left wall — z from -7 to -27.6 (length 20.6, centred at -17.3)
+            addBox(-9.6, EXT_YC, -17.3, WT, EXT_H, 20.6, extMat);
+            // Right wall
+            addBox( 9.6, EXT_YC, -17.3, WT, EXT_H, 20.6, extMat);
+            // Back wall
+            addBox( 0,   EXT_YC, -27.6, 20, EXT_H, WT, extMat);
+            // Front wall left of corridor opening (corridor is 4 wide centred on x=0)
+            // Interior doorway wall spans x=-9 to x=-1.5 on the left. Exterior must cover that.
+            // Corridor exterior is at x=±2.6 thickness 0.8. So exterior front wall should go
+            // from x=-9.6 (meets tomb left wall) to x=-2.2 (meets corridor left wall edge).
+            // Width = 7.4, centred at x=-5.9
+            addBox(-5.9, EXT_YC, -9.4, 7.4, EXT_H, WT, extMat);
+            addBox( 5.9, EXT_YC, -9.4, 7.4, EXT_H, WT, extMat);
+
+            // === Corridor exterior: x[-2.2, 2.2], z[-9, 7.1] ===
+            // Corridor left wall — spans z from -9.4 (into tomb front) to +7.5 (past door)
+            // Length = 16.9, centred at z=-0.95
+            addBox(-2.6, EXT_YC, -0.95, WT, EXT_H, 16.9, extMat);
+            addBox( 2.6, EXT_YC, -0.95, WT, EXT_H, 16.9, extMat);
+            // Front wall — left/right of door opening, and above
+            addBox(-1.825, EXT_YC, 7.5, 0.75, EXT_H, WT, extMat);
+            addBox( 1.825, EXT_YC, 7.5, 0.75, EXT_H, WT, extMat);
+            addBox( 0, 4.7, 7.5, 2.9, 1.8, WT, extMat);
+
+            // === Roof — one big slab that covers the entire T-shape ===
+            // Tomb roof
+            addBox( 0, EXT_H + 0.4, -17.3, 20, 0.8, 20.6, extMat);
+            // Corridor roof
+            addBox( 0, EXT_H + 0.4, -0.95, 5.4, 0.8, 16.9, extMat);
 
             // Floor
             addBox( 0, -0.1, -17, 18, 0.2, 20, floorMat);
@@ -307,7 +340,7 @@
             // === PILLARS ===
             // x: ±3.5 — close to centre aisle but won't clip camera at z:-10
             const PILLAR_X = 3.5;
-            const PILLAR_Z  = [-12.0, -16.0, -20.0, -24.0];
+            const PILLAR_Z  = [-16.0, -20.0, -24.0];  // removed -12 pillars (too close to entrance)
 
             // === PILLARS ===
             // Build geometry pillars IMMEDIATELY (always visible, no async dependency)
@@ -401,7 +434,8 @@
   // --- SPHINX ---
 loader.load('Assets/Models/egyptian_style_sphinx_statue/scene.gltf', (gltf) => {
     const sphinxModel = gltf.scene;
-    
+    console.log('Sphinx loaded successfully!');
+
     // Force a tiny scale first to normalize it
     sphinxModel.scale.setScalar(0.01);
     
@@ -409,40 +443,86 @@ loader.load('Assets/Models/egyptian_style_sphinx_statue/scene.gltf', (gltf) => {
     const box = new THREE.Box3().setFromObject(sphinxModel);
     const size = box.getSize(new THREE.Vector3());
     console.log('RAW sphinx size:', size);
-    console.log('RAW sphinx min:', box.min, 'max:', box.max);
 
-    // Target: sphinx should be ~1.2m tall, ~2m long
-    const targetHeight = 1.2;
+    // Target: sphinx should be ~1.6m tall — medium size
+    const targetHeight = 1.6;
     const scaleFactor = targetHeight / size.y;
     sphinxModel.scale.setScalar(0.01 * scaleFactor);
     
     // Re-measure to get floor offset
     const box2 = new THREE.Box3().setFromObject(sphinxModel);
     const offsetY = -box2.min.y;
+    console.log('Sphinx offsetY:', offsetY);
 
-    sphinxModel.traverse(child => {
-        if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; }
+    // Replace all materials with a solid sandstone material — the original model's
+    // materials may have transparency/opacity issues that make it invisible
+    const sandstoneMat = new THREE.MeshStandardMaterial({
+        color: 0xC8A060,
+        roughness: 0.85,
+        metalness: 0.1,
+        emissive: 0x3A2A10,
+        emissiveIntensity: 0.25
     });
 
+    sphinxModel.traverse(child => {
+        if (child.isMesh) {
+            child.material = sandstoneMat;
+            child.castShadow = true;
+            child.receiveShadow = true;
+        }
+    });
+
+    // ── Sphinxes INSIDE tomb, in the CENTRE aisle near the first pair of columns (z=-16) ──
+    // Placed between the columns in the central walkway, heads facing the corridor (+z direction)
     const sxL = sphinxModel.clone();
-    sxL.position.set(-3.0, offsetY, -13.0);
-    sxL.rotation.y = Math.PI; // face inward toward corridor entrance
+    sxL.position.set(-1.4, offsetY, -16.0);
+    sxL.rotation.y = Math.PI; // face toward +z (the corridor door)
     scene.add(sxL);
 
     const sxR = sphinxModel.clone();
-    sxR.position.set( 3.0, offsetY, -13.0);
-    sxR.rotation.y = Math.PI;
+    sxR.position.set( 1.4, offsetY, -16.0);
+    sxR.rotation.y = Math.PI; // face toward +z (the corridor door)
     scene.add(sxR);
+
+    // ── Sphinxes OUTSIDE tomb, flanking the exterior door in the desert (z=+10) ──
+    const sxOutL = sphinxModel.clone();
+    sxOutL.position.set(-3.0, offsetY, 10.0);
+    sxOutL.rotation.y = Math.PI;
+    sxOutL.scale.multiplyScalar(1.5);
+    scene.add(sxOutL);
+
+    const sxOutR = sphinxModel.clone();
+    sxOutR.position.set( 3.0, offsetY, 10.0);
+    sxOutR.rotation.y = Math.PI;
+    sxOutR.scale.multiplyScalar(1.5);
+    scene.add(sxOutR);
 }, undefined, err => console.error('Sphinx error:', err));
 
-// --- PHARAOH ---
+// --- PHARAOH (with test-cube fallback so something always shows) ---
+// First place bright test markers at the intended positions so user can see EXACTLY where they should go
+const pharaohMarkerMat = new THREE.MeshBasicMaterial({ color: 0xFFD700 });
+const markerL = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.8, 0.8), pharaohMarkerMat);
+markerL.position.set(-3.5, 0.9, -10.5);
+scene.add(markerL);
+const markerR = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.8, 0.8), pharaohMarkerMat);
+markerR.position.set(3.5, 0.9, -10.5);
+scene.add(markerR);
+console.log('Placed gold marker cubes at cat pharaoh positions');
+
 loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
+    console.log('Cat pharaoh GLTF loaded!');
     const catModel = gltf.scene;
 
     catModel.scale.setScalar(0.01);
-
     const box = new THREE.Box3().setFromObject(catModel);
     const size = box.getSize(new THREE.Vector3());
+    console.log('RAW cat pharaoh size:', size);
+
+    // If the model has zero size in Y, something is broken
+    if (size.y < 0.001) {
+        console.error('Cat pharaoh has zero height! Using markers only.');
+        return;
+    }
 
     const targetHeight = 1.8;
     const scaleFactor = targetHeight / size.y;
@@ -450,19 +530,45 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
 
     const box2 = new THREE.Box3().setFromObject(catModel);
     const offsetY = -box2.min.y;
+    console.log('Cat pharaoh offsetY:', offsetY);
+
+    let meshCount = 0;
+    catModel.traverse(c => { if (c.isMesh) meshCount++; });
+    console.log('Cat pharaoh mesh count:', meshCount);
+
+    if (meshCount === 0) {
+        console.error('Cat pharaoh has NO meshes! Using markers only.');
+        return;
+    }
 
     catModel.traverse(child => {
-        if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; }
+        if (child.isMesh) {
+            // MeshBasicMaterial = always fully visible, no lighting required
+            child.material = new THREE.MeshBasicMaterial({
+                color: 0xFFD700,
+                side: THREE.DoubleSide
+            });
+            child.visible = true;
+            child.frustumCulled = false;
+            child.renderOrder = 10; // render AFTER everything else so nothing occludes it
+        }
     });
 
+    // Model loaded successfully — remove the test markers and place real models
+    scene.remove(markerL);
+    scene.remove(markerR);
+
     const catL = catModel.clone();
-    catL.position.set(-2.2, offsetY, -25.5);
+    catL.position.set(-3.5, offsetY, -10.5);
+    catL.rotation.y = Math.PI / 6;
     scene.add(catL);
 
     const catR = catModel.clone();
-    catR.position.set(2.2, offsetY, -25.5);
+    catR.position.set(3.5, offsetY, -10.5);
+    catR.rotation.y = -Math.PI / 6;
     scene.add(catR);
-}, undefined, err => console.error('Pharaoh error:', err));
+    console.log('Cat pharaohs placed successfully.');
+}, undefined, err => console.error('Pharaoh LOAD ERROR:', err));
         }
 
         function buildStation1() {
@@ -930,22 +1036,27 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
                 return mesh;
             }
 
-            // ── TOMB SIDE WALLS — full wall coverage (height 5.4) ──
-            muralMesh(20, 5.4, new THREE.Vector3(-8.83, 2.7, -17),  Math.PI/2);
-            muralMesh(20, 5.4, new THREE.Vector3( 8.83, 2.7, -17), -Math.PI/2);
+            // ── MURAL BANDS — thick horizontal strip in middle, wall colour shows above/below ──
+            // Band is 1.8m tall, centred at y=1.8 (from y=0.9 to y=2.7)
+            // Wall colour shows below (y=0 to 0.9) and above (y=2.7 to 5.4)
+            const BAND_H = 1.8;
+            const BAND_Y = 1.8;
 
-            // ── TOMB BACK WALL (z=-27) full height ──
-            muralMesh(18, 5.4, new THREE.Vector3(0, 2.7, -26.83), 0);
+            // TOMB SIDE WALLS
+            muralMesh(20, BAND_H, new THREE.Vector3(-8.83, BAND_Y, -17),  Math.PI/2);
+            muralMesh(20, BAND_H, new THREE.Vector3( 8.83, BAND_Y, -17), -Math.PI/2);
 
-            // ── TOMB FRONT WALL (z=-7, either side of corridor opening) ──
-            muralMesh(6, 5.4, new THREE.Vector3(-6,   2.7, -7.17), Math.PI);
-            muralMesh(6, 5.4, new THREE.Vector3( 6,   2.7, -7.17), Math.PI);
-            // Frieze above corridor opening
-            muralMesh(3, 1.3, new THREE.Vector3(0, 4.6, -7.17), Math.PI);
+            // TOMB BACK WALL (z=-27)
+            muralMesh(18, BAND_H, new THREE.Vector3(0, BAND_Y, -26.83), 0);
 
-            // ── CORRIDOR SIDE WALLS ──
-            muralMesh(16, 3.4, new THREE.Vector3(-1.83, 1.7, -1),  Math.PI/2);
-            muralMesh(16, 3.4, new THREE.Vector3( 1.83, 1.7, -1), -Math.PI/2);
+            // TOMB FRONT WALL (z=-7, either side of corridor opening)
+            muralMesh(6, BAND_H, new THREE.Vector3(-6, BAND_Y, -7.17), Math.PI);
+            muralMesh(6, BAND_H, new THREE.Vector3( 6, BAND_Y, -7.17), Math.PI);
+
+            // CORRIDOR SIDE WALLS — corridor is shorter (3.5m tall), so use smaller band
+            // Corridor band: 1.4m tall centred at y=1.5 (from y=0.8 to y=2.2)
+            muralMesh(16, 1.4, new THREE.Vector3(-1.83, 1.5, -1),  Math.PI/2);
+            muralMesh(16, 1.4, new THREE.Vector3( 1.83, 1.5, -1), -Math.PI/2);
 
             // Swap all to real texture once loaded
             muralLoader.load('Assets/textures/facts-about-ancient-egypt-1.jpg', (tex) => {
@@ -957,17 +1068,6 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
 
         function buildEgyptExit() {
             const DOOR_Z = 6.2;
-
-            // ── Seal walls around the door (so tomb is fully enclosed) ──
-            const wallMat2 = new THREE.MeshStandardMaterial({color: 0x4A2D18, roughness: 0.9});
-            // Stone wall above the doorway (between lintel and ceiling)
-            const aboveDoor = new THREE.Mesh(new THREE.BoxGeometry(4, 1, 0.3), wallMat2);
-            aboveDoor.position.set(0, 4.1, DOOR_Z); scene.add(aboveDoor);
-            // Short stone panels to either side of the door (corridor is 4 wide, door is 3 wide)
-            const leftPanel = new THREE.Mesh(new THREE.BoxGeometry(0.6, 4, 0.3), wallMat2);
-            leftPanel.position.set(-1.9, 2, DOOR_Z); scene.add(leftPanel);
-            const rightPanel = new THREE.Mesh(new THREE.BoxGeometry(0.6, 4, 0.3), wallMat2);
-            rightPanel.position.set(1.9, 2, DOOR_Z); scene.add(rightPanel);
 
             // ── Door frame ──
             const frameMat = new THREE.MeshStandardMaterial({color:0x8B6914,roughness:0.7,metalness:0.3,emissive:0x3A2A00,emissiveIntensity:0.4});
@@ -1109,12 +1209,12 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
                 undefined, () => {} // silent fallback
             );
 
-            // ── SANDY GROUND — only in Egypt area, doesn't reach back to tomb ──
+            // ── SANDY GROUND — massive plane under everything so room doesn't look floating ──
             const sandMat = new THREE.MeshStandardMaterial({color:0xD4A840, roughness:1.0});
-            const ground = new THREE.Mesh(new THREE.PlaneGeometry(300,200), sandMat);
+            const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), sandMat);
             ground.rotation.x = -Math.PI/2;
-            // Position so front edge starts at DOOR_Z+0.3 (just past the door), extends forward
-            ground.position.set(0, 0, DOOR_Z + 100 + 0.3);
+            // Position at y=-0.1 (just below the tomb floor which is at y=-0.1 too) centred under everything
+            ground.position.set(0, -0.15, 0);
             scene.add(ground);
 
             // Sand dune bumps
