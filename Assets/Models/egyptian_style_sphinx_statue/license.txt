@@ -1,0 +1,11 @@
+Model Information:
+* title:	Egyptian-style sphinx statue
+* source:	https://sketchfab.com/3d-models/egyptian-style-sphinx-statue-9003a8376d7444bfb435391333116ef7
+* author:	Sofia Nasopoulou (https://sketchfab.com/sofianasopoulou)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Egyptian-style sphinx statue" (https://sketchfab.com/3d-models/egyptian-style-sphinx-statue-9003a8376d7444bfb435391333116ef7) by Sofia Nasopoulou (https://sketchfab.com/sofianasopoulou) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

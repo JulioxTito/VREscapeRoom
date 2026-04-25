@@ -6,15 +6,12 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
-        body {
-            margin: 0;
-            overflow: hidden;
-            background-color: #110800;
-        }
+        body { margin: 0; overflow: hidden; background-color: #110800; }
     </style>
 </head>
 
 <body>
+    <audio id="bgMusic" src="Assets/audio/tomb_music.mp3" loop></audio>
 
     <script type="importmap">
         {
@@ -38,96 +35,139 @@
         let camera, scene, renderer, raycaster;
         let controller1, controller2;
         let controllerGrip1, controllerGrip2;
-        let cameraRig; // Parent object we move for locomotion
+        let cameraRig;
 
-        // Movement
         const moveSpeed = 2.0;
-        const snapAngle = Math.PI / 4; // 45 degrees
+        const snapAngle = Math.PI / 4;
         let canSnapLeft = true;
         let canSnapRight = true;
 
-        // WASD keys for desktop testing
         const keys = {};
         window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
         window.addEventListener('keyup',   e => keys[e.key.toLowerCase()] = false);
 
-        // Game state
-        let gamePhase = 'corridor'; // 'corridor' | 'tomb'
-        let scarab = null;
-        let pedestal = null;
-        let pedestalSinking = false;
+        let gamePhase = 'tomb';
         let grabbableObjects = [];
         const intersected = [];
 
-        // Tomb room group
-        let tombRoom = null;
+        // Puzzle state
+        let station1Solved = false;
+        let station2Solved = false;
+        let station3Solved = false;
 
-        // Torch model cache
+        // Station 2 scale state
+        let leftPanMass  = 1.0; 
+        let rightPanMass = 0.0; 
+        let scalePanLeft  = null;
+        let scalePanRight = null;
+        let scaleBeamMesh = null;
+        const scaleObjects = []; 
+
+        // Station 3 glyph counter state
+        const ANSWER = { sun: 4, star: 6, snake: 3 };
+        const playerInput = { sun: 0, star: 0, snake: 0 };
+        let station3Frame = null;
+        const counterButtons = []; 
+
+        // Station 1 scroll state
+        const scrollPieces = [];
+        const scrollSolved = new Set();
+        const scrollSnapTargets = {
+            piece_0: new THREE.Vector3(-6.25, 0.22, -11.75),
+            piece_1: new THREE.Vector3(-5.85, 0.22, -11.75),
+            piece_2: new THREE.Vector3(-6.25, 0.22, -12.25),
+            piece_3: new THREE.Vector3(-5.85, 0.22, -12.25),
+        };
+
+        // Lever state
+        let leverArm = null;
+        let leverActive = false;
+        let leverPulled = false;
+        const leverObjects = [];
+
+        // Torch model
         let torchTemplate = null;
         const pendingTorchPlacements = [];
+        
+        // All torch point lights — animated each frame for flicker
+        const torchLights = [];
         const loader = new GLTFLoader();
 
         loader.load('Assets/Models/torch/scene.gltf', (gltf) => {
             torchTemplate = gltf.scene;
             torchTemplate.scale.set(0.5, 0.5, 0.5);
-
             torchTemplate.traverse((child) => {
                 if (!child.isMesh) return;
-                const matName = child.material.name.toLowerCase();
-                if (matName === 'flames') {
-                    // Hide the sprite sheet plane — we use our own flame sphere
+                if (child.material.name.toLowerCase() === 'flames') {
                     child.visible = false;
                 } else {
-                    // Torch body — no emissive blowout
                     child.material.emissiveIntensity = 0.05;
                 }
             });
-
             pendingTorchPlacements.forEach(p => placeTorch(p.parent, p.x, p.y, p.z, p.lightIntensity));
             pendingTorchPlacements.length = 0;
-            console.log('Torch model loaded successfully');
-        }, undefined, (err) => {
-            console.error('Torch failed:', err);
-        });
+        }, undefined, (err) => console.error('Torch failed:', err));
 
         init();
 
-        // -------------------------------------------------------------------
-        // INIT
-        // -------------------------------------------------------------------
         function init() {
-
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x110800);
-            scene.fog = new THREE.Fog(0x110800, 5, 20);
+            scene.background = new THREE.Color(0x0A0402); // changed to sky color when outside
+            
+            // Moderate fog — room stays visible but far end fades naturally
+            scene.fog = new THREE.FogExp2(0x0A0402, 0.018); // reduced — exterior needs visibility 
 
-            // Camera Rig — move this for locomotion
+            // Background music — starts on first user interaction (browsers block autoplay)
+            const bgMusic = document.getElementById('bgMusic');
+            if (bgMusic) {
+                bgMusic.volume = 0.3; // 30% volume — change to adjust loudness (0.0 to 1.0)
+                const startMusic = () => bgMusic.play().catch(() => {});
+                document.addEventListener('click', startMusic, { once: true });
+                document.addEventListener('keydown', startMusic, { once: true });
+                // VR session also counts as interaction
+                if (window.addEventListener) {
+                    window.addEventListener('touchstart', startMusic, { once: true });
+                }
+            }
+
             cameraRig = new THREE.Group();
-            cameraRig.position.set(0, 0, 4); // Start at corridor entrance
+            cameraRig.position.set(0, 0, -10); 
             scene.add(cameraRig);
 
-            camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 50);
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 500);
             camera.position.set(0, 1.6, 0);
             cameraRig.add(camera);
 
-            // Dim ambient — torches carry the scene
-            scene.add(new THREE.AmbientLight(0x3D1F00, 0.4));
+            // Warm ambient — enough to see stone surfaces clearly, torches add drama
+            scene.add(new THREE.AmbientLight(0x6B3010, 2.0)); 
+
+            // Hemisphere: warm firelight from below bouncing off stone floor, cool dark above
+            const hemi = new THREE.HemisphereLight(0x7A3208, 0x080200, 1.4);
+            scene.add(hemi);
 
             buildCorridor();
             buildTombRoom();
+            buildStation1();
+            buildStation2();
+            buildStation3();
+            buildStation4(); 
+            buildLever();
+            buildWallPaintings();
+            buildEgyptExit();
 
-            // --- RENDERER ---
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.setAnimationLoop(animate);
             renderer.xr.enabled = true;
             renderer.shadowMap.enabled = true;
+            
+            // Enhanced shadows for contrast
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
             document.body.appendChild(renderer.domElement);
             document.body.appendChild(VRButton.createButton(renderer));
 
-            // --- CONTROLLERS (added to cameraRig so they move with player) ---
             raycaster = new THREE.Raycaster();
 
             controller1 = renderer.xr.getController(0);
@@ -141,7 +181,6 @@
             cameraRig.add(controller2);
 
             const factory = new XRControllerModelFactory();
-
             controllerGrip1 = renderer.xr.getControllerGrip(0);
             controllerGrip1.add(factory.createControllerModel(controllerGrip1));
             cameraRig.add(controllerGrip1);
@@ -150,7 +189,6 @@
             controllerGrip2.add(factory.createControllerModel(controllerGrip2));
             cameraRig.add(controllerGrip2);
 
-            // Laser pointer lines
             const lineGeo = new THREE.BufferGeometry().setFromPoints([
                 new THREE.Vector3(0, 0, 0),
                 new THREE.Vector3(0, 0, -1)
@@ -161,317 +199,1235 @@
             controller1.add(line.clone());
             controller2.add(line.clone());
 
+            // Desktop mouse click — triggers lever when clicked
+            renderer.domElement.addEventListener('click', (e) => {
+                if (renderer.xr.isPresenting) return; // only in non-VR mode
+                const mouse = new THREE.Vector2(
+                    (e.clientX / window.innerWidth) * 2 - 1,
+                    -(e.clientY / window.innerHeight) * 2 + 1
+                );
+                const rc = new THREE.Raycaster();
+                rc.setFromCamera(mouse, camera);
+                const hits = rc.intersectObjects(grabbableObjects, true);
+                for (const h of hits) {
+                    let o = h.object;
+                    while (o && !o.userData.type) o = o.parent;
+                    if (o && o.userData.type === 'lever') {
+                        scene.userData.leverPulled = true;
+                        scene.userData.leverT = 0;
+                        console.log('Lever pulled via mouse click!');
+                        return;
+                    }
+                }
+            });
+
             window.addEventListener('resize', onWindowResize);
         }
 
-        // -------------------------------------------------------------------
-        // BUILD CORRIDOR
-        // Dark reddish tunnel. Torches only light source.
-        // Golden scarab glows at the far end on a pedestal.
-        // -------------------------------------------------------------------
         function buildCorridor() {
+            // Match tomb room materials exactly
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x3D2515, roughness: 0.95 });
+            const wallMat  = new THREE.MeshStandardMaterial({ color: 0x4A2D18, roughness: 0.9  });
+            const ceilMat  = new THREE.MeshStandardMaterial({ color: 0x150A04, roughness: 1.0  });
 
-            const stoneMat = new THREE.MeshStandardMaterial({ color: 0x6B3A1F, roughness: 1.0 });
-            const darkMat  = new THREE.MeshStandardMaterial({ color: 0x3D1F08, roughness: 1.0 });
+            // Corridor box: z range [-9 to +7], width 4 (x: -2 to +2), height 3.5
+            addBox(0, -0.1, -1, 4, 0.2, 16, floorMat);      // floor — same as tomb
+            addBox(0,  3.6, -1, 4, 0.2, 16, ceilMat);       // ceiling — same as tomb
+            // Side walls — same as tomb walls
+            addBox(-2, 1.75, -1, 0.2, 3.5, 16, wallMat);
+            addBox( 2, 1.75, -1, 0.2, 3.5, 16, wallMat);
+
+            // Corridor ends at z=+7.5 — door at z=+6.2 seals it when closed
+            // (no end-cap wall here; the door + stone panels in buildEgyptExit do the sealing)
+
+            // Torches
+            [
+                { x: -1.8, z:  2 }, { x:  1.8, z:  2 },
+                { x: -1.8, z: -1 }, { x:  1.8, z: -1 },
+                { x: -1.8, z: -4 }, { x:  1.8, z: -4 },
+            ].forEach(p => spawnTorch(scene, p.x, 2.0, p.z));
+        }
+
+        function buildTombRoom() {
+            // Stone materials — warm brownish-red like the reference
+            const floorMat   = new THREE.MeshStandardMaterial({ color: 0x080400, roughness: 1.0, metalness: 0 });  // match ceiling darkness
+            const wallMat    = new THREE.MeshStandardMaterial({ color: 0x4A2D18, roughness: 0.9  });
+            const ceilMat    = new THREE.MeshStandardMaterial({ color: 0x080400, roughness: 1.0, metalness: 0 });
+            const backWallMat = new THREE.MeshStandardMaterial({ color: 0x5A3520, roughness: 0.85, emissive: 0x3A1A08, emissiveIntensity: 0.4 });
+            const exteriorMat = new THREE.MeshStandardMaterial({ color: 0x8B6020, roughness: 1.0 }); // sandstone outside
+
+            // ── Exterior: solid sandstone building that wraps both tomb and corridor ──
+            // Use a SINGLE wide box shape so there are no gaps/edges between tomb and corridor.
+            // We build exterior walls around the PERIMETER of the combined shape (tomb + corridor T).
+            const extMat = new THREE.MeshStandardMaterial({ color: 0xC89040, roughness: 1.0 });
+
+            // Tomb outline: x[-9, 9], z[-27, -9]  (the wider back block)
+            // Corridor outline: x[-2, 2], z[-9, 7]  (narrow passage forward)
+            // Common roof: use tomb height 5.6 everywhere for a uniform building height
+
+            // === Unified exterior building (tomb + corridor T-shape) ===
+            // Build as ONE continuous outer shell, all walls aligned perfectly to avoid edges.
+            // Tomb: x[-9.2, 9.2], z[-27.2, -9]
+            // Corridor: x[-2.2, 2.2], z[-9, 7.1]
+            // Where corridor meets tomb (at z=-9), the corridor walls must EXTEND INTO the tomb
+            // wall plane so there's no gap, and tomb's front wall ENDS exactly at corridor edges.
+
+            const EXT_H = 5.6;        // exterior height
+            const EXT_YC = EXT_H/2;    // y centre = 2.8
+            const WT = 0.8;            // wall thickness — thicker so there are NO gaps
+
+            // === Tomb exterior: x[-9.2, 9.2], z[-9, -27.2] ===
+            // Interior side walls span z=-7 to z=-27. Exterior must cover FULL span.
+            // Left wall — z from -7 to -27.6 (length 20.6, centred at -17.3)
+            addBox(-9.6, EXT_YC, -17.3, WT, EXT_H, 20.6, extMat);
+            // Right wall
+            addBox( 9.6, EXT_YC, -17.3, WT, EXT_H, 20.6, extMat);
+            // Back wall
+            addBox( 0,   EXT_YC, -27.6, 20, EXT_H, WT, extMat);
+            // Front wall left of corridor opening (corridor is 4 wide centred on x=0)
+            // Interior doorway wall spans x=-9 to x=-1.5 on the left. Exterior must cover that.
+            // Corridor exterior is at x=±2.6 thickness 0.8. So exterior front wall should go
+            // from x=-9.6 (meets tomb left wall) to x=-2.2 (meets corridor left wall edge).
+            // Width = 7.4, centred at x=-5.9
+            addBox(-5.9, EXT_YC, -9.4, 7.4, EXT_H, WT, extMat);
+            addBox( 5.9, EXT_YC, -9.4, 7.4, EXT_H, WT, extMat);
+
+            // === Corridor exterior: x[-2.2, 2.2], z[-9, 7.1] ===
+            // Corridor left wall — spans z from -9.4 (into tomb front) to +7.5 (past door)
+            // Length = 16.9, centred at z=-0.95
+            addBox(-2.6, EXT_YC, -0.95, WT, EXT_H, 16.9, extMat);
+            addBox( 2.6, EXT_YC, -0.95, WT, EXT_H, 16.9, extMat);
+            // Front wall — left/right of door opening, and above
+            addBox(-1.825, EXT_YC, 7.5, 0.75, EXT_H, WT, extMat);
+            addBox( 1.825, EXT_YC, 7.5, 0.75, EXT_H, WT, extMat);
+            addBox( 0, 4.7, 7.5, 2.9, 1.8, WT, extMat);
+
+            // === Roof — one big slab that covers the entire T-shape ===
+            // Tomb roof
+            addBox( 0, EXT_H + 0.4, -17.3, 20, 0.8, 20.6, extMat);
+            // Corridor roof
+            addBox( 0, EXT_H + 0.4, -0.95, 5.4, 0.8, 16.9, extMat);
 
             // Floor
-            addBox(0, -0.1, -2, 4, 0.2, 14, darkMat);
+            addBox( 0, -0.1, -17, 18, 0.2, 20, floorMat);
             // Ceiling
-            addBox(0, 3.6, -2, 4, 0.2, 14, darkMat);
-            // Left wall
-            addBox(-2, 1.75, -2, 0.2, 3.5, 14, stoneMat);
-            // Right wall
-            addBox(2, 1.75, -2, 0.2, 3.5, 14, stoneMat);
+            addBox( 0,  5.2, -17, 18, 0.3, 20, ceilMat);
 
-            // Torch pairs along corridor
-            [
-                { x: -1.8, z:  2 },
-                { x:  1.8, z:  2 },
-                { x: -1.8, z: -1 },
-                { x:  1.8, z: -1 },
-                { x: -1.8, z: -4 },
-                { x:  1.8, z: -4 },
-            ].forEach(p => spawnTorch(scene, p.x, 2.0, p.z));
+            // Back wall — emissive orange centre glow
+            const backWall = new THREE.Mesh(new THREE.BoxGeometry(18, 5.6, 0.3), backWallMat);
+            backWall.position.set(0, 2.6, -27);
+            backWall.receiveShadow = true;
+            scene.add(backWall);
 
-            // Pedestal
-            const pedestalMat = new THREE.MeshStandardMaterial({ color: 0x5C3D1E, roughness: 0.8 });
-            pedestal = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.0, 0.5), pedestalMat);
-            pedestal.position.set(0, 0.5, -8);
-            scene.add(pedestal);
+            // Side walls
+            addBox(-9, 2.6, -17, 0.3, 5.6, 20, wallMat);
+            addBox( 9, 2.6, -17, 0.3, 5.6, 20, wallMat);
 
-            // Golden Scarab (placeholder box — Blender model replaces this later)
-            const scarabMat = new THREE.MeshStandardMaterial({
-                color: 0xFFD700,
-                roughness: 0.2,
-                metalness: 0.9,
-                emissive: new THREE.Color(0xFFAA00),
-                emissiveIntensity: 0.4
+            // Doorway wall — extends fully from side wall to side wall
+            // Side walls at x=±9. Opening is 3 wide centred on x=0 (from x=-1.5 to +1.5)
+            // Left doorway wall: from x=-9 to x=-1.5, width 7.5, centred at x=-5.25
+            addBox(-5.25, 2.6, -9, 7.5, 5.6, 0.3, wallMat);
+            // Right doorway wall: from x=+1.5 to x=+9, width 7.5, centred at x=+5.25
+            addBox( 5.25, 2.6, -9, 7.5, 5.6, 0.3, wallMat);
+            // Lintel above doorway
+            addBox(   0, 4.6, -9,   3, 1.5, 0.3, wallMat);
+
+            // Floor tiles
+            const groutMat = new THREE.MeshStandardMaterial({ color: 0x251508, roughness: 1.0 });
+            for (let i = -4; i <= 4; i++) addBox(i * 2, 0.0, -17, 0.06, 0.015, 20, groutMat);
+            for (let j = 0; j <= 9; j++) addBox(0, 0.0, -8 - j * 2.2, 18, 0.015, 0.06, groutMat);
+
+            // === PILLARS ===
+            // x: ±3.5 — close to centre aisle but won't clip camera at z:-10
+            const PILLAR_X = 3.5;
+            const PILLAR_Z  = [-16.0, -20.0, -24.0];  // removed -12 pillars (too close to entrance)
+
+            // === PILLARS ===
+            // Build geometry pillars IMMEDIATELY (always visible, no async dependency)
+            // GLTF will replace them if it loads successfully
+            const pillarMeshGroups = [];
+            const pillarMat  = new THREE.MeshStandardMaterial({ color: 0xC8922A, roughness: 0.45, metalness: 0.72, emissive: new THREE.Color(0x6B3D08), emissiveIntensity: 0.4 });
+            const baseCapMat = new THREE.MeshStandardMaterial({ color: 0xAA7820, roughness: 0.5,  metalness: 0.65, emissive: new THREE.Color(0x4A2A04), emissiveIntensity: 0.35 });
+            const pH = 5.1;
+            PILLAR_Z.forEach(zPos => {
+                [-PILLAR_X, PILLAR_X].forEach(xPos => {
+                    const grp = new THREE.Group();
+                    grp.position.set(xPos, 0, zPos);
+
+                    const base = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.35, 1.2), baseCapMat);
+                    base.position.y = 0.17; base.receiveShadow = true; grp.add(base);
+
+                    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.44, 0.52, pH, 8), pillarMat);
+                    shaft.position.y = pH / 2 + 0.35; shaft.castShadow = true; shaft.receiveShadow = true; grp.add(shaft);
+
+                    const cap = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.4, 1.15), baseCapMat);
+                    cap.position.y = pH + 0.55; cap.receiveShadow = true; grp.add(cap);
+
+                    scene.add(grp);
+                    pillarMeshGroups.push(grp);
+                });
             });
-            scarab = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.15, 0.3), scarabMat);
-            scarab.position.set(0, 1.15, -8);
-            scarab.name = 'scarab';
-            scene.add(scarab);
-            grabbableObjects.push(scarab);
 
-            // Glow above scarab to draw the player's eye
-            const glow = new THREE.PointLight(0xFFCC00, 2, 3);
-            glow.position.set(0, 1.6, -8);
-            scene.add(glow);
+            // Try loading GLTF — swap geometry if it succeeds
+            loader.load('Assets/Models/egyptian_pillar_v1/scene.gltf', (gltf) => {
+                // Remove geometry fallbacks
+                pillarMeshGroups.forEach(g => scene.remove(g));
+
+                const pillarModel = gltf.scene;
+                pillarModel.scale.set(0.5, 0.9, 0.5);
+
+                // FULLY REPLACE all materials with rich ancient gold
+                const goldMat = new THREE.MeshStandardMaterial({
+                    color:            0xC8922A,   // deep antique gold
+                    emissive:         new THREE.Color(0x6B3D08),
+                    emissiveIntensity: 0.4,
+                    roughness:        0.45,
+                    metalness:        0.72,
+                });
+
+                pillarModel.traverse((child) => {
+                    if (child.isMesh) {
+                        child.castShadow    = true;
+                        child.receiveShadow = true;
+                        child.material      = goldMat; // replace, don't patch
+                    }
+                });
+
+                PILLAR_Z.forEach(zPos => {
+                    const pL = pillarModel.clone(); pL.position.set(-PILLAR_X, 0, zPos); scene.add(pL);
+                    const pR = pillarModel.clone(); pR.position.set( PILLAR_X, 0, zPos); pR.rotation.y = Math.PI; scene.add(pR);
+                });
+            }, undefined, (err) => {
+                console.warn('Pillar GLTF not found, using geometry fallback:', err);
+                // Geometry pillars already in scene — nothing to do
+            });
+
+            // === TORCHES ===
+            // Front pair — visible immediately on entry
+            placeTorch(scene, -7.0, 2.2, -12.0, 6.0);
+            placeTorch(scene,  7.0, 2.2, -12.0, 6.0);
+            // Mid pair — lights the colonnade
+            placeTorch(scene, -7.0, 2.2, -18.0, 5.5);
+            placeTorch(scene,  7.0, 2.2, -18.0, 5.5);
+            // Back pair — lights far end and back wall bloom
+            placeTorch(scene, -7.0, 2.2, -24.0, 5.0);
+            placeTorch(scene,  7.0, 2.2, -24.0, 5.0);
+
+            // Back-wall bloom — warm orange concentrated glow on the far wall
+            const backGlow = new THREE.PointLight(0xBB3A08, 5.0, 20);
+            backGlow.position.set(0, 2.2, -25.5);
+            scene.add(backGlow);
+
+            // Centre ceiling fill so the aisle floor is visible
+            const aisleLight = new THREE.PointLight(0x7A3810, 2.5, 18);
+            aisleLight.position.set(0, 4.5, -16);
+            scene.add(aisleLight);
+
+            // Platform mats (where stations sit)
+            const platformMat = new THREE.MeshStandardMaterial({ color: 0x4A2E14, roughness: 0.9 });
+            addBox(-6.5, 0.05, -12, 3, 0.06, 3, platformMat);
+            addBox(-6.5, 0.05, -22, 3, 0.06, 3, platformMat);
+            addBox( 6.5, 0.05, -12, 3, 0.06, 3, platformMat);
+            addBox( 6.5, 0.05, -22, 3, 0.06, 3, platformMat);
+
+
+  // --- SPHINX ---
+loader.load('Assets/Models/egyptian_style_sphinx_statue/scene.gltf', (gltf) => {
+    const sphinxModel = gltf.scene;
+    console.log('Sphinx loaded successfully!');
+
+    // Force a tiny scale first to normalize it
+    sphinxModel.scale.setScalar(0.01);
+    
+    // Now measure
+    const box = new THREE.Box3().setFromObject(sphinxModel);
+    const size = box.getSize(new THREE.Vector3());
+    console.log('RAW sphinx size:', size);
+
+    // Target: sphinx should be ~1.6m tall — medium size
+    const targetHeight = 1.6;
+    const scaleFactor = targetHeight / size.y;
+    sphinxModel.scale.setScalar(0.01 * scaleFactor);
+    
+    // Re-measure to get floor offset
+    const box2 = new THREE.Box3().setFromObject(sphinxModel);
+    const offsetY = -box2.min.y;
+    console.log('Sphinx offsetY:', offsetY);
+
+    // Replace all materials with a solid sandstone material — the original model's
+    // materials may have transparency/opacity issues that make it invisible
+    const sandstoneMat = new THREE.MeshStandardMaterial({
+        color: 0xC8A060,
+        roughness: 0.85,
+        metalness: 0.1,
+        emissive: 0x3A2A10,
+        emissiveIntensity: 0.25
+    });
+
+    sphinxModel.traverse(child => {
+        if (child.isMesh) {
+            child.material = sandstoneMat;
+            child.castShadow = true;
+            child.receiveShadow = true;
+        }
+    });
+
+    // ── Sphinxes INSIDE tomb, in the CENTRE aisle near the first pair of columns (z=-16) ──
+    // Placed between the columns in the central walkway, heads facing the corridor (+z direction)
+    const sxL = sphinxModel.clone();
+    sxL.position.set(-1.4, offsetY, -16.0);
+    sxL.rotation.y = Math.PI; // face toward +z (the corridor door)
+    scene.add(sxL);
+
+    const sxR = sphinxModel.clone();
+    sxR.position.set( 1.4, offsetY, -16.0);
+    sxR.rotation.y = Math.PI; // face toward +z (the corridor door)
+    scene.add(sxR);
+
+    // ── Sphinxes OUTSIDE tomb, flanking the exterior door in the desert (z=+10) ──
+    const sxOutL = sphinxModel.clone();
+    sxOutL.position.set(-3.0, offsetY, 10.0);
+    sxOutL.rotation.y = Math.PI;
+    sxOutL.scale.multiplyScalar(1.5);
+    scene.add(sxOutL);
+
+    const sxOutR = sphinxModel.clone();
+    sxOutR.position.set( 3.0, offsetY, 10.0);
+    sxOutR.rotation.y = Math.PI;
+    sxOutR.scale.multiplyScalar(1.5);
+    scene.add(sxOutR);
+}, undefined, err => console.error('Sphinx error:', err));
+
+// --- PHARAOH (with test-cube fallback so something always shows) ---
+// First place bright test markers at the intended positions so user can see EXACTLY where they should go
+const pharaohMarkerMat = new THREE.MeshBasicMaterial({ color: 0xFFD700 });
+const markerL = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.8, 0.8), pharaohMarkerMat);
+markerL.position.set(-3.5, 0.9, -10.5);
+scene.add(markerL);
+const markerR = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.8, 0.8), pharaohMarkerMat);
+markerR.position.set(3.5, 0.9, -10.5);
+scene.add(markerR);
+console.log('Placed gold marker cubes at cat pharaoh positions');
+
+loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
+    console.log('Cat pharaoh GLTF loaded!');
+    const catModel = gltf.scene;
+
+    catModel.scale.setScalar(0.01);
+    const box = new THREE.Box3().setFromObject(catModel);
+    const size = box.getSize(new THREE.Vector3());
+    console.log('RAW cat pharaoh size:', size);
+
+    // If the model has zero size in Y, something is broken
+    if (size.y < 0.001) {
+        console.error('Cat pharaoh has zero height! Using markers only.');
+        return;
+    }
+
+    const targetHeight = 1.8;
+    const scaleFactor = targetHeight / size.y;
+    catModel.scale.setScalar(0.01 * scaleFactor);
+
+    const box2 = new THREE.Box3().setFromObject(catModel);
+    const offsetY = -box2.min.y;
+    console.log('Cat pharaoh offsetY:', offsetY);
+
+    let meshCount = 0;
+    catModel.traverse(c => { if (c.isMesh) meshCount++; });
+    console.log('Cat pharaoh mesh count:', meshCount);
+
+    if (meshCount === 0) {
+        console.error('Cat pharaoh has NO meshes! Using markers only.');
+        return;
+    }
+
+    catModel.traverse(child => {
+        if (child.isMesh) {
+            // MeshBasicMaterial = always fully visible, no lighting required
+            child.material = new THREE.MeshBasicMaterial({
+                color: 0xFFD700,
+                side: THREE.DoubleSide
+            });
+            child.visible = true;
+            child.frustumCulled = false;
+            child.renderOrder = 10; // render AFTER everything else so nothing occludes it
+        }
+    });
+
+    // Model loaded successfully — remove the test markers and place real models
+    scene.remove(markerL);
+    scene.remove(markerR);
+
+    const catL = catModel.clone();
+    catL.position.set(-3.5, offsetY, -10.5);
+    catL.rotation.y = Math.PI / 6;
+    scene.add(catL);
+
+    const catR = catModel.clone();
+    catR.position.set(3.5, offsetY, -10.5);
+    catR.rotation.y = -Math.PI / 6;
+    scene.add(catR);
+    console.log('Cat pharaohs placed successfully.');
+}, undefined, err => console.error('Pharaoh LOAD ERROR:', err));
         }
 
-        // -------------------------------------------------------------------
-        // BUILD TOMB ROOM
-        // Bigger room beyond the corridor. Starts hidden.
-        // 3 puzzle platforms: left, center-back, right.
-        // Only puzzle 1 lights up when phase 2 starts.
-        // -------------------------------------------------------------------
-        function buildTombRoom() {
+        function buildStation1() {
+    const tableMat = new THREE.MeshStandardMaterial({ color: 0x7A6A50, roughness: 0.7 });
+    const legMat   = new THREE.MeshStandardMaterial({ color: 0x6A5A40, roughness: 0.8 });
 
-            tombRoom = new THREE.Group();
-            scene.add(tombRoom);
+    const tableTop = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.08, 0.7), tableMat);
+    tableTop.position.set(-6, 0.84, -12);
+    tableTop.receiveShadow = true;
+    scene.add(tableTop);
 
-            const stoneMat = new THREE.MeshStandardMaterial({ color: 0x9C8A6E, roughness: 0.9 });
-            const wallMat  = new THREE.MeshStandardMaterial({ color: 0x8B7355, roughness: 0.9 });
-            const darkMat  = new THREE.MeshStandardMaterial({ color: 0x4A3A2A, roughness: 1.0 });
+    [[-0.5,-0.28],[-0.5,0.28],[0.5,-0.28],[0.5,0.28]].forEach(([x,z]) => {
+        const leg = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.84, 0.1), legMat);
+        leg.position.set(-6 + x, 0.42, -12 + z);
+        scene.add(leg);
+    });
 
-            // Floor & Ceiling
-            addBoxTo(tombRoom,  0, -0.1, -17,  16, 0.2, 16, stoneMat);
-            addBoxTo(tombRoom,  0,  4.6, -17,  16, 0.2, 16, darkMat);
+    makeTextPanel('STATION 1\nAssemble the scroll', -6, 1.8, -12, 0.8, 0.35);
 
-            // Walls
-            addBoxTo(tombRoom,  0, 2.3, -25, 16, 4.7, 0.3, wallMat); // back
-            addBoxTo(tombRoom, -8, 2.3, -17, 0.3, 4.7, 16, wallMat); // left
-            addBoxTo(tombRoom,  8, 2.3, -17, 0.3, 4.7, 16, wallMat); // right
+    const colors = [0xD4A96A, 0xC8985E, 0xDDB87A, 0xBF8A50];
+    colors.forEach((color, i) => {
+        const geo = new THREE.PlaneGeometry(0.26, 0.18);
+        const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.9, side: THREE.DoubleSide });
+        const piece = new THREE.Mesh(geo, mat);
+        piece.position.set(-6 + (Math.random() - 0.5) * 0.8, 0.90, -12 + (Math.random() - 0.5) * 0.4);
+        piece.rotation.x = -Math.PI / 2;
+        piece.name = `piece_${i}`;
+        piece.userData.type = 'scrollPiece';
+        scene.add(piece);
+        scrollPieces.push(piece);
+        grabbableObjects.push(piece);
+    });
+}
+        function buildStation2() {
+            const pedMat = new THREE.MeshStandardMaterial({ color: 0x7A6A50, roughness: 0.7 });
+            const ped = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.9, 0.5), pedMat);
+            ped.position.set(-6, 0.45, -22);
+            ped.receiveShadow = true;
+            scene.add(ped);
 
-            // Connector wall between corridor and tomb (with opening)
-            addBoxTo(tombRoom, -3.5, 2.3, -9, 5.5, 4.7, 0.3, wallMat);
-            addBoxTo(tombRoom,  3.5, 2.3, -9, 5.5, 4.7, 0.3, wallMat);
-            // Top of doorway
-            addBoxTo(tombRoom,  0, 3.8, -9, 3, 1.5, 0.3, wallMat);
+            const goldMat = new THREE.MeshStandardMaterial({ color: 0xDAA520, roughness: 0.2, metalness: 0.8 });
+            const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.04, 0.7, 12), goldMat);
+            pillar.position.set(-6, 1.25, -22);
+            scene.add(pillar);
 
-            // --- PUZZLE PLATFORMS ---
+            scaleBeamMesh = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.04, 0.04), goldMat);
+            scaleBeamMesh.position.set(-6, 1.62, -22);
+            scene.add(scaleBeamMesh);
 
-            // Puzzle 1 — Broken Tablet (LEFT)
-            const p1Platform = addBoxTo(tombRoom, -5, 0.05, -17, 4, 0.1, 4, 
-                new THREE.MeshStandardMaterial({ color: 0x6B5A3E, roughness: 0.9 }));
+            scalePanLeft = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.025, 16), goldMat);
+            scalePanLeft.position.set(-6.42, 1.38, -22);
+            scene.add(scalePanLeft);
 
-            // Puzzle 1 torches (start visible, will light up in phase 2)
-            spawnTorchTo(tombRoom, -6.5, 2, -15, true);
-            spawnTorchTo(tombRoom, -3.5, 2, -15, true);
+            scalePanRight = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.025, 16), goldMat);
+            scalePanRight.position.set(-5.58, 1.38, -22);
+            scene.add(scalePanRight);
 
-            // Puzzle 1 light (starts OFF)
-            const p1Light = new THREE.PointLight(0xff5500, 0, 8);
-            p1Light.name = 'puzzle1Light';
-            p1Light.position.set(-5, 3, -17);
-            tombRoom.add(p1Light);
+            const weights = [{ name: 'ankh', mass: 1.0 }, { name: 'feather', mass: 0.3 }, { name: 'jar', mass: 2.0 }];
+            weights.forEach((w, i) => {
+                const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), new THREE.MeshStandardMaterial({color: 0xffffff}));
+                mesh.position.set(-5.3, 0.95, -21 + i * 0.3);
+                mesh.userData.type = 'weight';
+                mesh.userData.mass = w.mass;
+                mesh.name = w.name;
+                mesh.castShadow = true;
+                scene.add(mesh);
+                scaleObjects.push(mesh);
+                grabbableObjects.push(mesh);
+            });
 
-            // Puzzle 2 — Scale (CENTER BACK)
-            addBoxTo(tombRoom, 0, 0.05, -22, 4, 0.1, 4,
-                new THREE.MeshStandardMaterial({ color: 0x4A3A2A, roughness: 1.0 }));
+            makeTextPanel('STATION 2\nBalance the scales', -6, 2.2, -22, 0.9, 0.35);
 
-            // Puzzle 3 — Combo Lock (RIGHT)
-            addBoxTo(tombRoom, 5, 0.05, -17, 4, 0.1, 4,
-                new THREE.MeshStandardMaterial({ color: 0x4A3A2A, roughness: 1.0 }));
-
-            // Hide tomb room until scarab is grabbed
-            tombRoom.visible = false;
+            const s2Light = new THREE.PointLight(0xFF4500, 0, 10); // UPDATED: Orange-Red color
+            s2Light.name = 'station2Light';
+            s2Light.position.set(-6, 3.5, -22);
+            scene.add(s2Light);
         }
 
-        // -------------------------------------------------------------------
-        // PHASE 2 — Scarab grabbed, tomb opens
-        // -------------------------------------------------------------------
-        function triggerPhase2() {
-            gamePhase = 'tomb';
-            scarab.visible = false;
-            pedestalSinking = true;
-            tombRoom.visible = true;
+        function buildStation3() {
+            const podMat = new THREE.MeshStandardMaterial({ color: 0x7A6A50, roughness: 0.7 });
+            const pod = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.0, 0.5), podMat);
+            pod.position.set(6, 0.5, -12);
+            pod.receiveShadow = true;
+            scene.add(pod);
 
-            // Light up Puzzle 1
-            const p1Light = tombRoom.getObjectByName('puzzle1Light');
-            if (p1Light) p1Light.intensity = 2.5;
+            station3Frame = new THREE.Group();
+            station3Frame.position.set(7.8, 2.0, -12); 
+            station3Frame.rotation.y = -Math.PI / 2;
+            station3Frame.visible = false;
+            scene.add(station3Frame);
 
-            // Remove scarab from grabbable list
-            grabbableObjects = grabbableObjects.filter(o => o.name !== 'scarab');
+            const frameBg = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.8), new THREE.MeshStandardMaterial({ color: 0x2a1500 }));
+            station3Frame.add(frameBg);
 
-            console.log('Phase 2 — Tomb revealed. Puzzle 1 lit.');
+            makeTextPanel('STATION 3\nCount the glyphs', 6, 1.85, -12, 0.85, 0.35);
+            spawnGlyphs();
+
+            const s3Light = new THREE.PointLight(0xFF4500, 0, 10);
+            s3Light.name = 'station3Light';
+            s3Light.position.set(6, 3.5, -12);
+            scene.add(s3Light);
         }
 
-        // -------------------------------------------------------------------
-        // CONTROLLER EVENTS
-        // -------------------------------------------------------------------
+        function buildStation4() {
+             const podMat = new THREE.MeshStandardMaterial({ color: 0x7A6A50, roughness: 0.7 });
+             const pod = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.0, 0.5), podMat);
+             pod.position.set(6, 0.5, -22);
+             pod.receiveShadow = true;
+             scene.add(pod);
+             makeTextPanel('STATION 4\nFinal Clue', 6, 1.85, -22, 0.85, 0.35);
+        }
+
+        function spawnGlyphs() {
+            const symbols = { sun: '☀', star: '★', snake: '〜' };
+            const colors  = { sun: '#FFD700', star: '#AAAAFF', snake: '#88FF88' };
+            Object.entries(ANSWER).forEach(([type, count]) => {
+                for (let i = 0; i < count; i++) {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 64; canvas.height = 64;
+                    const ctx = canvas.getContext('2d');
+                    ctx.fillStyle = colors[type];
+                    ctx.font = '44px serif';
+                    ctx.fillText(symbols[type], 10, 50);
+                    const plane = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.4), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true }));
+                    plane.position.set((Math.random()-0.5)*14, 1+Math.random()*2.5, -24.8);
+                    scene.add(plane);
+                }
+            });
+        }
+
+        function buildWallPaintings() {
+            // Called for both tomb side walls AND corridor walls
+            // Tomb side walls: x=±9 inner face, z centre -17, length 20
+            // Corridor walls: x=±2 inner face, z centre -2, length 14
+
+            function drawEgyptMural(cw, ch, seed) {
+                const canvas = document.createElement('canvas');
+                canvas.width = cw; canvas.height = ch;
+                const ctx = canvas.getContext('2d');
+
+                // ── Sandy ochre stone base ──
+                const grad = ctx.createLinearGradient(0,0,0,ch);
+                grad.addColorStop(0,   '#D4A855');
+                grad.addColorStop(0.4, '#C89840');
+                grad.addColorStop(1,   '#A07830');
+                ctx.fillStyle = grad;
+                ctx.fillRect(0, 0, cw, ch);
+
+                // Age stains
+                ctx.globalAlpha = 0.08;
+                for (let i=0;i<60;i++){
+                    const sx=(i/60)*cw+Math.sin(i)*30;
+                    ctx.fillStyle = i%3===0?'#7A4A10':i%3===1?'#E8C870':'#5A3010';
+                    ctx.fillRect(sx,0,1+Math.random()*4,ch);
+                }
+                ctx.globalAlpha = 1;
+
+                // ── Frieze bands top & bottom ──
+                const FB = Math.round(ch*0.14);
+                // Top band
+                ctx.fillStyle='#8B3A0A'; ctx.fillRect(0,0,cw,FB);
+                // Decorative stripe inside top band
+                ctx.fillStyle='#F5C040'; ctx.fillRect(0,FB-4,cw,4);
+                ctx.fillStyle='#5A1800'; ctx.fillRect(0,0,cw,3);
+
+                // Bottom band
+                ctx.fillStyle='#8B3A0A'; ctx.fillRect(0,ch-FB,cw,FB);
+                ctx.fillStyle='#F5C040'; ctx.fillRect(0,ch-FB,cw,4);
+                ctx.fillStyle='#5A1800'; ctx.fillRect(0,ch-3,cw,3);
+
+                // Hieroglyphs in bands - repeating rows
+                const GLYPHS = ['𓂀','𓆣','𓇳','𓏏','𓆑','𓃭','𓂋','𓅓','𓆗','𓏲','𓇯','𓏭','𓄿','𓇋','𓏲','𓃒'];
+                const gSize = Math.round(FB * 0.65);
+                ctx.font = `${gSize}px serif`;
+                ctx.fillStyle = '#F5D080';
+                ctx.textAlign = 'left';
+                const step = gSize + 4;
+                for (let gx=0; gx<cw; gx+=step) {
+                    const gi = Math.floor(gx/step + seed) % GLYPHS.length;
+                    ctx.fillText(GLYPHS[gi], gx+2, FB-4);
+                    ctx.fillText(GLYPHS[(gi+7)%GLYPHS.length], gx+2, ch-5);
+                }
+
+                // ── Scene area ──
+                const SY = FB + 2;
+                const SH = ch - FB*2 - 4;
+                const GY = SY + SH; // ground line y
+
+                // Ground register line
+                ctx.strokeStyle='#6B3010'; ctx.lineWidth=2;
+                ctx.beginPath(); ctx.moveTo(0,GY-2); ctx.lineTo(cw,GY-2); ctx.stroke();
+
+                // Top register line
+                ctx.beginPath(); ctx.moveTo(0,SY+2); ctx.lineTo(cw,SY+2); ctx.stroke();
+
+                // ── Figure drawing ──
+                function fig(x, scl, dir, type) {
+                    // type: 0=pharaoh, 1=priest, 2=god, 3=worker, 4=seated
+                    ctx.save();
+                    ctx.translate(x, GY);
+                    ctx.scale(dir * scl, scl);
+
+                    const H = 160; // figure height in canvas units
+                    const skin  = type===2?'#8B4513': type===3?'#A0522D':'#CD853F';
+                    const kilt  = type===2?'#DAA520': type===1?'#F5F5DC':'#FFFFFF';
+                    const crown = type===0?'#1E5A8A': type===2?'#DAA520':'none';
+
+                    // Legs (stride pose)
+                    ctx.fillStyle=skin;
+                    ctx.fillRect(-6, -H*0.47, 10, H*0.47);  // back leg
+                    ctx.fillRect(8,  -H*0.50, 10, H*0.47);  // front leg
+
+                    // Kilt/skirt
+                    ctx.fillStyle=kilt;
+                    ctx.beginPath();
+                    ctx.moveTo(-8,-H*0.47); ctx.lineTo(22,-H*0.47);
+                    ctx.lineTo(20,-H*0.27); ctx.lineTo(-6,-H*0.27);
+                    ctx.closePath(); ctx.fill();
+                    ctx.strokeStyle='#8B6914'; ctx.lineWidth=1; ctx.stroke();
+                    if(type===2){// gold belt
+                        ctx.strokeStyle='#FFD700'; ctx.lineWidth=2;
+                        ctx.beginPath();ctx.moveTo(-8,-H*0.47);ctx.lineTo(22,-H*0.47);ctx.stroke();
+                    }
+
+                    // Torso
+                    ctx.fillStyle=skin;
+                    ctx.fillRect(-6,-H*0.77, 26, H*0.31);
+
+                    // Collar necklace
+                    ctx.strokeStyle='#DAA520'; ctx.lineWidth=3;
+                    ctx.beginPath(); ctx.arc(7,-H*0.65,14,-Math.PI*0.8,0.1); ctx.stroke();
+                    // Collar beads
+                    ctx.fillStyle='#1E5A8A';
+                    for(let b=0;b<5;b++){
+                        const ba=-Math.PI*0.75+b*(Math.PI*0.85/4);
+                        ctx.beginPath(); ctx.arc(7+Math.cos(ba)*14,-H*0.65+Math.sin(ba)*14,2.5,0,Math.PI*2); ctx.fill();
+                    }
+
+                    // Head (profile)
+                    ctx.fillStyle=skin;
+                    ctx.beginPath(); ctx.ellipse(8,-H*0.88,12,15,-0.1,0,Math.PI*2); ctx.fill();
+
+                    // Crown/headdress
+                    if(type===0){ // nemes blue+gold stripes
+                        ctx.fillStyle='#1E5A8A';
+                        ctx.beginPath();
+                        ctx.moveTo(-4,-H*0.98); ctx.lineTo(20,-H*0.98);
+                        ctx.lineTo(18,-H*0.77); ctx.lineTo(-2,-H*0.77);
+                        ctx.closePath(); ctx.fill();
+                        ctx.fillStyle='#DAA520';
+                        for(let s=0;s<4;s++) ctx.fillRect(-3+s*5,-H*0.98,3,H*0.21);
+                        // uraeus
+                        ctx.fillStyle='#C03020';
+                        ctx.beginPath(); ctx.arc(18,-H*0.98,4,0,Math.PI*2); ctx.fill();
+                    } else if(type===2){ // tall white double crown
+                        ctx.fillStyle='#F5F5DC';
+                        ctx.fillRect(0,-H*1.22,16,H*0.25);
+                        ctx.beginPath(); ctx.arc(8,-H*1.22,8,Math.PI,0); ctx.fill();
+                        ctx.fillStyle='#C03020'; // red inner
+                        ctx.fillRect(3,-H*1.18,10,H*0.18);
+                    } else if(type===1){ // shaved or wig
+                        ctx.fillStyle='#1A0A00';
+                        ctx.beginPath(); ctx.ellipse(7,-H*0.90,11,13,0,0,Math.PI*2); ctx.fill();
+                    }
+
+                    // Eye (kohl-lined profile)
+                    ctx.fillStyle='#1A0A00';
+                    ctx.beginPath(); ctx.ellipse(16,-H*0.86,5,3,0,0,Math.PI*2); ctx.fill();
+                    ctx.fillStyle='#FFFFFF';
+                    ctx.beginPath(); ctx.ellipse(15,-H*0.86,3,2,0,0,Math.PI*2); ctx.fill();
+                    ctx.fillStyle='#1A0A00';
+                    ctx.beginPath(); ctx.arc(16,-H*0.86,2,0,Math.PI*2); ctx.fill();
+                    // kohl line
+                    ctx.strokeStyle='#000'; ctx.lineWidth=1.5;
+                    ctx.beginPath(); ctx.moveTo(20,-H*0.84); ctx.lineTo(26,-H*0.80); ctx.stroke();
+
+                    // Forward arm (offering)
+                    ctx.strokeStyle=skin; ctx.lineWidth=7;
+                    ctx.beginPath(); ctx.moveTo(8,-H*0.68); ctx.lineTo(34,-H*0.55); ctx.stroke();
+                    ctx.fillStyle=skin;
+                    ctx.beginPath(); ctx.arc(34,-H*0.53,6,0,Math.PI*2); ctx.fill();
+
+                    // Back arm (down)
+                    ctx.beginPath(); ctx.moveTo(4,-H*0.68); ctx.lineTo(-2,-H*0.50); ctx.stroke();
+
+                    // Worker variant: bent carrying pose
+                    if(type===3){
+                        ctx.strokeStyle=skin; ctx.lineWidth=7;
+                        ctx.beginPath(); ctx.moveTo(8,-H*0.68); ctx.lineTo(10,-H*0.45); ctx.stroke();
+                        ctx.beginPath(); ctx.moveTo(4,-H*0.68); ctx.lineTo(-8,-H*0.78); ctx.stroke();
+                        // load on back
+                        ctx.fillStyle='#8B6914';
+                        ctx.fillRect(-14,-H*0.88,12,18);
+                    }
+
+                    ctx.restore();
+                }
+
+                // ── Glyph column ──
+                function glyphCol(x, n, off) {
+                    const gs2 = Math.round(SH*0.11);
+                    ctx.font=`${gs2}px serif`; ctx.fillStyle='#5A2800'; ctx.textAlign='center';
+                    for(let i=0;i<n;i++) ctx.fillText(GLYPHS[(off+i)%GLYPHS.length], x, SY+14+i*(gs2+2));
+                }
+
+                // ── Decorative elements ──
+                function lotus(x) {
+                    ctx.strokeStyle='#2A7A30'; ctx.lineWidth=2;
+                    ctx.beginPath(); ctx.moveTo(x,GY-2); ctx.lineTo(x,GY-SH*0.4); ctx.stroke();
+                    const ly=GY-SH*0.4;
+                    const pColors=['#E860A0','#C040A0','#FF80C0','#D050B0','#F070B0'];
+                    for(let p=0;p<5;p++){
+                        const a=(p/5)*Math.PI*2-Math.PI/2;
+                        ctx.fillStyle=pColors[p];
+                        ctx.beginPath();
+                        ctx.ellipse(x+Math.cos(a)*10,ly+Math.sin(a)*10,5,12,a,0,Math.PI*2);
+                        ctx.fill();
+                    }
+                    ctx.fillStyle='#FFD700';
+                    ctx.beginPath(); ctx.arc(x,ly,7,0,Math.PI*2); ctx.fill();
+                }
+
+                function ankh(x, y, s) {
+                    ctx.strokeStyle='#DAA520'; ctx.lineWidth=s*3;
+                    ctx.beginPath(); ctx.moveTo(x,y-s*6); ctx.lineTo(x,y+s*14); ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(x-s*6,y); ctx.lineTo(x+s*6,y); ctx.stroke();
+                    ctx.beginPath(); ctx.arc(x,y-s*6,s*5,0,Math.PI*2); ctx.stroke();
+                }
+
+                function altar(x) {
+                    const ay=GY;
+                    ctx.fillStyle='#7A4A18';
+                    ctx.fillRect(x-28,ay-SH*0.18,56,8);
+                    ctx.fillRect(x-22,ay-SH*0.18+8,8,SH*0.18-8);
+                    ctx.fillRect(x+14,ay-SH*0.18+8,8,SH*0.18-8);
+                    // offerings
+                    ctx.fillStyle='#C03020'; ctx.beginPath(); ctx.arc(x-10,ay-SH*0.18-8,7,0,Math.PI*2); ctx.fill();
+                    ctx.fillStyle='#E8C040'; ctx.beginPath(); ctx.arc(x+10,ay-SH*0.18-8,6,0,Math.PI*2); ctx.fill();
+                    ctx.fillStyle='#40A040'; ctx.fillRect(x-4,ay-SH*0.18-24,8,16);
+                }
+
+                function scarab(x,y) {
+                    ctx.fillStyle='#2040C0';
+                    ctx.beginPath(); ctx.ellipse(x,y,14,18,0,0,Math.PI*2); ctx.fill();
+                    ctx.strokeStyle='#6080FF'; ctx.lineWidth=1.5;
+                    ctx.beginPath();ctx.moveTo(x,y-16);ctx.lineTo(x,y+16);ctx.stroke();
+                    ctx.beginPath();ctx.moveTo(x-14,y);ctx.lineTo(x+14,y);ctx.stroke();
+                    ctx.fillStyle='#FFD700';
+                    ctx.beginPath(); ctx.arc(x,y-26,9,0,Math.PI*2); ctx.fill();
+                }
+
+                function sunDisc(x,y,r) {
+                    ctx.fillStyle='#FFD700';
+                    ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
+                    ctx.strokeStyle='#FF8C00'; ctx.lineWidth=2; ctx.stroke();
+                    for(let i=0;i<12;i++){
+                        const a=(i/12)*Math.PI*2;
+                        ctx.beginPath();
+                        ctx.moveTo(x+Math.cos(a)*(r+2),y+Math.sin(a)*(r+2));
+                        ctx.lineTo(x+Math.cos(a)*(r+10),y+Math.sin(a)*(r+10));
+                        ctx.strokeStyle='#FFD700'; ctx.lineWidth=1.5; ctx.stroke();
+                    }
+                }
+
+                // ── Layout: repeating sections ──
+                const SEC = Math.round(cw * 0.22); // section width ~22% of canvas
+                const nSec = Math.ceil(cw / SEC) + 1;
+                const figH = SH * 0.95;
+                const figScale = figH / 160;
+
+                for(let s=0; s<nSec; s++){
+                    const ox = s * SEC;
+                    const sc = (s + seed) % 5;
+
+                    glyphCol(ox+18, 5, (s*3+seed)%GLYPHS.length);
+
+                    if(sc===0){
+                        // Pharaoh offering to god at altar
+                        fig(ox+70,  figScale*0.9,  1, 0); // pharaoh
+                        fig(ox+170, figScale*0.85, 1, 1); // priest
+                        altar(ox+SEC*0.58);
+                        fig(ox+SEC*0.72, figScale*0.95,-1, 2); // god
+                        ankh(ox+SEC*0.58, GY-SH*0.55, figScale*8);
+                        scarab(ox+SEC*0.58, SY+SH*0.22);
+
+                    } else if(sc===1){
+                        // Procession of workers
+                        fig(ox+50,  figScale*0.9,  1, 2);
+                        fig(ox+130, figScale*0.8,  1, 3);
+                        fig(ox+195, figScale*0.8,  1, 3);
+                        fig(ox+260, figScale*0.8,  1, 1);
+                        lotus(ox+SEC*0.8);
+                        lotus(ox+SEC*0.45);
+                        sunDisc(ox+SEC*0.62, SY+SH*0.28, SH*0.12);
+
+                    } else if(sc===2){
+                        // Weighing of the heart
+                        fig(ox+60,  figScale*0.9,  1, 2);
+                        fig(ox+SEC*0.85, figScale*0.85,-1, 1);
+                        // Scales of Ma'at
+                        const sx=ox+SEC*0.5, sb=SY+SH*0.15;
+                        ctx.strokeStyle='#DAA520'; ctx.lineWidth=3;
+                        ctx.beginPath();ctx.moveTo(sx,sb);ctx.lineTo(sx,sb+SH*0.55);ctx.stroke();
+                        ctx.beginPath();ctx.moveTo(sx-SEC*0.2,sb+SH*0.1);ctx.lineTo(sx+SEC*0.2,sb+SH*0.1);ctx.stroke();
+                        ctx.beginPath();ctx.moveTo(sx-SEC*0.2,sb+SH*0.1);ctx.lineTo(sx-SEC*0.2,sb+SH*0.38);ctx.stroke();
+                        ctx.arc(sx-SEC*0.2,sb+SH*0.40,SEC*0.08,0,Math.PI); ctx.stroke();
+                        ctx.beginPath();ctx.moveTo(sx+SEC*0.2,sb+SH*0.1);ctx.lineTo(sx+SEC*0.2,sb+SH*0.28);ctx.stroke();
+                        ctx.beginPath();ctx.arc(sx+SEC*0.2,sb+SH*0.30,SEC*0.08,0,Math.PI); ctx.stroke();
+                        ctx.font=`${SH*0.18}px serif`; ctx.textAlign='center';
+                        ctx.fillStyle='#C03020'; ctx.fillText('𓃒',sx-SEC*0.2,sb+SH*0.41);
+                        ctx.fillStyle='#F5D080'; ctx.fillText('𓆃',sx+SEC*0.2,sb+SH*0.31);
+                        ctx.font=`bold ${SH*0.3}px serif`; ctx.fillStyle='#F5D080';
+                        ctx.fillText('𓂀',sx,SY+SH*0.35);
+
+                    } else if(sc===3){
+                        // Solar barque procession
+                        fig(ox+60,  figScale*0.9,  1, 0);
+                        fig(ox+145, figScale*0.8,  1, 1);
+                        fig(ox+SEC*0.75, figScale*0.85,-1, 1);
+                        fig(ox+SEC*0.9,  figScale*0.9, -1, 2);
+                        // barque
+                        const bx=ox+SEC*0.52, by=GY-SH*0.32;
+                        ctx.fillStyle='#C8922A'; ctx.strokeStyle='#DAA520'; ctx.lineWidth=2;
+                        ctx.beginPath();
+                        ctx.moveTo(bx-SEC*0.16,by);
+                        ctx.quadraticCurveTo(bx,by+SH*0.12,bx+SEC*0.16,by);
+                        ctx.quadraticCurveTo(bx,by-SH*0.04,bx-SEC*0.16,by);
+                        ctx.fill(); ctx.stroke();
+                        sunDisc(bx, by-SH*0.18, SH*0.11);
+                        lotus(ox+SEC*0.52-SEC*0.1);
+                        lotus(ox+SEC*0.52+SEC*0.1);
+
+                    } else {
+                        // Animal-headed gods ceremony
+                        fig(ox+60,  figScale*0.9, 1, 2);
+                        fig(ox+150, figScale*0.85,1, 0);
+                        fig(ox+240, figScale*0.8, 1, 1);
+                        altar(ox+SEC*0.62);
+                        fig(ox+SEC*0.78, figScale*0.9,-1, 2);
+                        ankh(ox+SEC*0.3, GY-SH*0.5, figScale*7);
+                        scarab(ox+SEC*0.15, SY+SH*0.25);
+                    }
+                }
+
+                return canvas;
+            }
+
+            // ── Load the mural texture once, apply to all walls ──
+            const muralLoader = new THREE.TextureLoader();
+
+            // Show canvas fallback immediately, swap to real photo when loaded
+            const fallbackCanvas = drawEgyptMural(4096, 512, 0);
+            const fallbackTex = new THREE.CanvasTexture(fallbackCanvas);
+
+            // All mural materials share the same texture (one load)
+            const muralMats = [];
+
+            function muralMesh(w, h, pos, rotY) {
+                const mat = new THREE.MeshBasicMaterial({ map: fallbackTex, side: THREE.FrontSide });
+                muralMats.push(mat);
+                const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
+                mesh.position.copy(pos);
+                mesh.rotation.y = rotY;
+                scene.add(mesh);
+                return mesh;
+            }
+
+            // ── MURAL BANDS — thick horizontal strip in middle, wall colour shows above/below ──
+            // Band is 1.8m tall, centred at y=1.8 (from y=0.9 to y=2.7)
+            // Wall colour shows below (y=0 to 0.9) and above (y=2.7 to 5.4)
+            const BAND_H = 1.8;
+            const BAND_Y = 1.8;
+
+            // TOMB SIDE WALLS
+            muralMesh(20, BAND_H, new THREE.Vector3(-8.83, BAND_Y, -17),  Math.PI/2);
+            muralMesh(20, BAND_H, new THREE.Vector3( 8.83, BAND_Y, -17), -Math.PI/2);
+
+            // TOMB BACK WALL (z=-27)
+            muralMesh(18, BAND_H, new THREE.Vector3(0, BAND_Y, -26.83), 0);
+
+            // TOMB FRONT WALL (z=-7, either side of corridor opening)
+            muralMesh(6, BAND_H, new THREE.Vector3(-6, BAND_Y, -7.17), Math.PI);
+            muralMesh(6, BAND_H, new THREE.Vector3( 6, BAND_Y, -7.17), Math.PI);
+
+            // CORRIDOR SIDE WALLS — corridor is shorter (3.5m tall), so use smaller band
+            // Corridor band: 1.4m tall centred at y=1.5 (from y=0.8 to y=2.2)
+            muralMesh(16, 1.4, new THREE.Vector3(-1.83, 1.5, -1),  Math.PI/2);
+            muralMesh(16, 1.4, new THREE.Vector3( 1.83, 1.5, -1), -Math.PI/2);
+
+            // Swap all to real texture once loaded
+            muralLoader.load('Assets/textures/facts-about-ancient-egypt-1.jpg', (tex) => {
+                tex.wrapS = THREE.RepeatWrapping;
+                tex.wrapT = THREE.ClampToEdgeWrapping;
+                muralMats.forEach(m => { m.map = tex; m.needsUpdate = true; });
+            });
+        }
+
+        function buildEgyptExit() {
+            const DOOR_Z = 6.2;
+
+            // ── Door frame ──
+            const frameMat = new THREE.MeshStandardMaterial({color:0x8B6914,roughness:0.7,metalness:0.3,emissive:0x3A2A00,emissiveIntensity:0.4});
+            [[-1.5,2,DOOR_Z],[1.5,2,DOOR_Z]].forEach(([x,y,z])=>{
+                const j=new THREE.Mesh(new THREE.BoxGeometry(0.4,4,0.4),frameMat);
+                j.position.set(x,y,z); scene.add(j);
+            });
+            const lintel=new THREE.Mesh(new THREE.BoxGeometry(3.4,0.5,0.4),frameMat);
+            lintel.position.set(0,4.1,DOOR_Z); scene.add(lintel);
+
+            // ── Animated door halves — decorated Egyptian wood ──
+            // Draw wood grain + hieroglyph panel as texture
+            function doorTex() {
+                const dc = document.createElement('canvas');
+                dc.width = 256; dc.height = 512;
+                const dx = dc.getContext('2d');
+                // Dark wood base
+                const wg = dx.createLinearGradient(0,0,256,0);
+                wg.addColorStop(0, '#3A1A06');
+                wg.addColorStop(0.5, '#5A2A0A');
+                wg.addColorStop(1, '#3A1A06');
+                dx.fillStyle = wg; dx.fillRect(0,0,256,512);
+                // Vertical wood grain streaks
+                dx.strokeStyle = 'rgba(20,8,0,0.4)';
+                dx.lineWidth = 2;
+                for (let i = 0; i < 18; i++) {
+                    dx.beginPath();
+                    dx.moveTo(10 + i * 14, 0);
+                    dx.lineTo(10 + i * 14 + Math.sin(i)*4, 512);
+                    dx.stroke();
+                }
+                // Carved panel in centre
+                dx.strokeStyle = '#8B6914';
+                dx.lineWidth = 4;
+                dx.strokeRect(30, 80, 196, 350);
+                dx.strokeRect(40, 90, 176, 330);
+                // Hieroglyphs inside panel
+                dx.fillStyle = '#DAA520';
+                dx.font = 'bold 52px serif';
+                dx.textAlign = 'center';
+                ['𓂀','𓆣','𓇳','𓏏','𓆑','𓃭','𓅓'].forEach((g,i) => {
+                    dx.fillText(g, 128, 135 + i * 50);
+                });
+                // Gold border strip at top and bottom
+                dx.fillStyle = '#DAA520';
+                dx.fillRect(0, 0, 256, 10);
+                dx.fillRect(0, 502, 256, 10);
+                return new THREE.CanvasTexture(dc);
+            }
+            const dTex = doorTex();
+            // Use MeshBasicMaterial so door is always fully visible regardless of lighting
+            const doorMat = new THREE.MeshBasicMaterial({ map: dTex });
+
+            // Single solid door slab that SLIDES UP (portcullis style)
+            const doorSlab = new THREE.Mesh(new THREE.BoxGeometry(2.9, 3.8, 0.15), doorMat);
+            doorSlab.position.set(0, 1.9, DOOR_Z);
+            scene.add(doorSlab);
+            doorSlab.userData.closedY = 1.9;
+
+            // Gold studs — children of door so they move with it
+            const studMat=new THREE.MeshStandardMaterial({color:0xDAA520,metalness:0.9,roughness:0.2,emissive:0x402000,emissiveIntensity:0.5});
+            // 3 columns × 3 rows of studs on the slab
+            [[-1.1,1.3],[0,1.3],[1.1,1.3],
+             [-1.1,0.0],[0,0.0],[1.1,0.0],
+             [-1.1,-1.3],[0,-1.3],[1.1,-1.3]].forEach(([sx,sy])=>{
+                const s2=new THREE.Mesh(new THREE.SphereGeometry(0.08,8,8),studMat);
+                s2.position.set(sx,sy,0.08); doorSlab.add(s2);
+            });
+
+            // Store references: use doorL to hold the single slab for compatibility
+            scene.userData.doorSlab = doorSlab;
+            scene.userData.doorOpen = false;
+            scene.userData.doorT = 0;
+            scene.userData.DOOR_Z = DOOR_Z;
+
+            // ── Egypt world starts here ──
+            const EZ = 14; // just past the door
+
+            // ── BACKGROUND: use outsideEgypt.jpg as equirectangular scene.background ──
+            // Build a fallback blue-sky gradient canvas first
+            const fallbackCanvas = document.createElement('canvas');
+            fallbackCanvas.width = 2048; fallbackCanvas.height = 1024;
+            const fc = fallbackCanvas.getContext('2d');
+            // Sky gradient
+            const skyG = fc.createLinearGradient(0,0,0,1024);
+            skyG.addColorStop(0,   '#1A6BC8');
+            skyG.addColorStop(0.5, '#4A9AE8');
+            skyG.addColorStop(0.7, '#C8D8F0');
+            skyG.addColorStop(0.8, '#E8D090');
+            skyG.addColorStop(1,   '#D4A840');
+            fc.fillStyle = skyG; fc.fillRect(0,0,2048,1024);
+            // Sun
+            const sunG = fc.createRadialGradient(1400,700,0,1400,700,160);
+            sunG.addColorStop(0,'rgba(255,255,200,1)');
+            sunG.addColorStop(0.3,'rgba(255,220,80,0.9)');
+            sunG.addColorStop(1,'rgba(255,180,0,0)');
+            fc.fillStyle=sunG; fc.fillRect(0,0,2048,1024);
+            // Horizon haze
+            const hazeG=fc.createLinearGradient(0,680,0,780);
+            hazeG.addColorStop(0,'rgba(220,200,160,0)');
+            hazeG.addColorStop(0.5,'rgba(220,200,160,0.6)');
+            hazeG.addColorStop(1,'rgba(200,180,140,0)');
+            fc.fillStyle=hazeG; fc.fillRect(0,680,2048,100);
+            // Desert ground (bottom third)
+            const desG=fc.createLinearGradient(0,780,0,1024);
+            desG.addColorStop(0,'#D4A840'); desG.addColorStop(1,'#C09030');
+            fc.fillStyle=desG; fc.fillRect(0,780,2048,244);
+            // Pyramid silhouettes on horizon
+            [[200,760,320,240],[550,760,420,310],[950,760,540,400],[1380,760,400,300],[1750,760,300,220]].forEach(([cx,by,w,h])=>{
+                fc.fillStyle='#8B6010';
+                fc.beginPath(); fc.moveTo(cx,by-h); fc.lineTo(cx-w/2,by); fc.lineTo(cx+w/2,by); fc.closePath(); fc.fill();
+                fc.fillStyle='rgba(255,200,80,0.15)';
+                fc.beginPath(); fc.moveTo(cx,by-h); fc.lineTo(cx,by); fc.lineTo(cx+w/2,by); fc.closePath(); fc.fill();
+            });
+            // Sand ripples
+            fc.strokeStyle='rgba(160,120,20,0.4)'; fc.lineWidth=2;
+            for(let r=0;r<12;r++){
+                fc.beginPath(); fc.moveTo(0,800+r*18);
+                fc.quadraticCurveTo(1024,790+r*18+Math.sin(r)*8,2048,800+r*18);
+                fc.stroke();
+            }
+            const fallbackTex = new THREE.CanvasTexture(fallbackCanvas);
+            fallbackTex.mapping = THREE.EquirectangularReflectionMapping;
+
+            // Store for animate loop to swap in/out
+            scene.userData.egyptBg = fallbackTex;
+            scene.userData.tombBg  = new THREE.Color(0x0A0402);
+            scene.userData.egyptStartZ = 8;
+
+            // Load real photo — swap when ready
+            new THREE.TextureLoader().load(
+                'Assets/textures/outsideEgypt.jpg',
+                (tex) => {
+                    tex.mapping = THREE.EquirectangularReflectionMapping;
+                    scene.userData.egyptBg = tex;
+                    // If player is already outside, apply immediately
+                    if (cameraRig.position.z > 8) scene.background = tex;
+                },
+                undefined, () => {} // silent fallback
+            );
+
+            // ── SANDY GROUND — massive plane under everything so room doesn't look floating ──
+            const sandMat = new THREE.MeshStandardMaterial({color:0xD4A840, roughness:1.0});
+            const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), sandMat);
+            ground.rotation.x = -Math.PI/2;
+            // Position at y=-0.1 (just below the tomb floor which is at y=-0.1 too) centred under everything
+            ground.position.set(0, -0.15, 0);
+            scene.add(ground);
+
+            // Sand dune bumps
+            const duneMat = new THREE.MeshStandardMaterial({color:0xC09030,roughness:1});
+            [[0,25,18,4],[20,40,14,3],[-18,35,16,3.5],[30,20,12,2.5],[-30,30,14,3]].forEach(([dx,dz,r,h])=>{
+                const d=new THREE.Mesh(new THREE.SphereGeometry(1,12,8),duneMat);
+                d.scale.set(r,h,r*1.5); d.position.set(dx,h*0.3,EZ+dz); scene.add(d);
+            });
+
+            // ── PYRAMIDS (3D cones) ──
+            const pyrMat = new THREE.MeshStandardMaterial({color:0xC8A040,roughness:0.9});
+            const pyrLitMat = new THREE.MeshStandardMaterial({color:0xE8C060,roughness:0.9,emissive:0x402000,emissiveIntensity:0.2});
+            function makePyr(px,pz,sz){
+                const geo=new THREE.ConeGeometry(sz,sz*1.3,4);
+                // Split into dark/lit faces by creating two half-cones
+                const m=new THREE.Mesh(geo,pyrMat);
+                m.rotation.y=Math.PI/4; m.position.set(px,sz*0.65,pz); scene.add(m);
+                // Lit face overlay
+                const litGeo=new THREE.ConeGeometry(sz*1.002,sz*1.3,4);
+                const litM=new THREE.Mesh(litGeo,pyrLitMat);
+                litM.rotation.y=Math.PI/4+Math.PI*0.5; litM.position.set(px,sz*0.65,pz);
+                litM.scale.x=0.5; scene.add(litM);
+                // Gold capstone
+                const cap=new THREE.Mesh(new THREE.SphereGeometry(sz*0.06,6,6),new THREE.MeshBasicMaterial({color:0xFFD700}));
+                cap.position.set(px,sz*1.3,pz); scene.add(cap);
+            }
+            makePyr(-24, EZ+55, 13);
+            makePyr(  1, EZ+68, 19); // Great pyramid
+            makePyr( 28, EZ+50, 11);
+            makePyr(-46, EZ+75,  8);
+            makePyr( 50, EZ+62,  9);
+
+            // ── SPHINX ──
+            const sM=new THREE.MeshStandardMaterial({color:0xB88820,roughness:0.9,emissive:0x301000,emissiveIntensity:0.25});
+            const sBody=new THREE.Mesh(new THREE.BoxGeometry(6,2.2,11),sM);
+            sBody.position.set(-36,1.1,EZ+28); scene.add(sBody);
+            const sHead=new THREE.Mesh(new THREE.BoxGeometry(2.5,3.2,2.5),sM);
+            sHead.position.set(-36,3.7,EZ+22); scene.add(sHead);
+            const sNemes=new THREE.Mesh(new THREE.BoxGeometry(3.4,2.2,1.4),sM);
+            sNemes.position.set(-36,5.2,EZ+22); scene.add(sNemes);
+            // Paws
+            [-37.5,-34.5].forEach(px2=>{
+                const p2=new THREE.Mesh(new THREE.BoxGeometry(1.6,0.8,3),sM);
+                p2.position.set(px2,0.4,EZ+19); scene.add(p2);
+            });
+
+            // ── OBELISK ──
+            const obM=new THREE.MeshStandardMaterial({color:0xD4A030,roughness:0.6,metalness:0.15,emissive:0x301000,emissiveIntensity:0.3});
+            const ob=new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.38,12,4),obM);
+            ob.rotation.y=Math.PI/4; ob.position.set(18,6,EZ+16); scene.add(ob);
+            const obTip=new THREE.Mesh(new THREE.ConeGeometry(0.14,1.4,4),new THREE.MeshBasicMaterial({color:0xFFD700}));
+            obTip.rotation.y=Math.PI/4; obTip.position.set(18,12.7,EZ+16); scene.add(obTip);
+
+            // ── PALM TREES ──
+            function palm(px,pz){
+                const tM=new THREE.MeshStandardMaterial({color:0x5A3410});
+                const trunk=new THREE.Mesh(new THREE.CylinderGeometry(0.08,0.18,5.5,6),tM);
+                trunk.position.set(px,2.75,pz); scene.add(trunk);
+                const lM=new THREE.MeshStandardMaterial({color:0x2A8020,side:THREE.DoubleSide});
+                for(let l=0;l<8;l++){
+                    const a=(l/8)*Math.PI*2;
+                    const leaf=new THREE.Mesh(new THREE.PlaneGeometry(0.35,3.0),lM);
+                    leaf.position.set(px+Math.cos(a)*1.2,5.9,pz+Math.sin(a)*1.2);
+                    leaf.rotation.set(-0.5,a,0.2); scene.add(leaf);
+                }
+            }
+            [[-7,EZ+12],[7,EZ+14],[-4,EZ+20],[12,EZ+18],[-20,EZ+22],[22,EZ+24],[-35,EZ+18],[35,EZ+15]].forEach(([x,z])=>palm(x,z));
+
+            // ── CAMELS ──
+            function camel(px,pz){
+                const cM=new THREE.MeshStandardMaterial({color:0x9A6428,roughness:0.9});
+                const body=new THREE.Mesh(new THREE.BoxGeometry(1.6,0.9,3.0),cM);
+                body.position.set(px,1.15,pz); scene.add(body);
+                const hump=new THREE.Mesh(new THREE.SphereGeometry(0.52,8,6),cM);
+                hump.scale.y=1.35; hump.position.set(px,2.0,pz); scene.add(hump);
+                const neck=new THREE.Mesh(new THREE.CylinderGeometry(0.14,0.2,1.2,6),cM);
+                neck.rotation.z=0.38; neck.position.set(px+0.65,1.85,pz-1.1); scene.add(neck);
+                const head=new THREE.Mesh(new THREE.BoxGeometry(0.45,0.42,0.72),cM);
+                head.position.set(px+1.15,2.45,pz-1.1); scene.add(head);
+                [[-0.45,0.45],[-0.45,-0.45],[0.45,0.45],[0.45,-0.45]].forEach(([lx,lz2])=>{
+                    const leg=new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.1,1.1,5),cM);
+                    leg.position.set(px+lx,0.25,pz+lz2); scene.add(leg);
+                });
+            }
+            camel(10, EZ+22); camel(15, EZ+26); camel(-12, EZ+30); camel(-8, EZ+40);
+
+            // ── LIGHTING ──
+            const sunLight=new THREE.DirectionalLight(0xFFE090,4.0);
+            sunLight.position.set(50,80,EZ+20); scene.add(sunLight);
+            const skyAmb=new THREE.HemisphereLight(0x88BBFF,0xC8A040,2.0);
+            scene.add(skyAmb);
+        }
+
+        function buildLever() {
+            // Lever sits ON TOP of the front-right pod at (x=6, y=0.5, z=-12), top at y≈1.0
+            // The group is oriented so +z axis points toward the centre of the room (-x direction)
+            const leverGroup = new THREE.Group();
+            leverGroup.position.set(6, 1.0, -12); // on top of front-right pod (what you call Station 4)
+            leverGroup.rotation.y = -Math.PI / 2; // face toward centre of room
+            scene.add(leverGroup);
+
+            // Stone backplate (flat against wall)
+            const plateMat = new THREE.MeshStandardMaterial({color: 0x5A3410, roughness: 0.9, emissive: 0x2A1400, emissiveIntensity: 0.6});
+            const plate = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.0, 0.1), plateMat);
+            plate.position.set(0, 0, 0.05); leverGroup.add(plate);
+
+            // Gold bracket protruding from plate
+            const bracketMat = new THREE.MeshStandardMaterial({color: 0xDAA520, metalness: 0.8, roughness: 0.25, emissive: 0x6A3A00, emissiveIntensity: 0.6});
+            const bracket = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.25, 0.18), bracketMat);
+            bracket.position.set(0, 0, 0.18); leverGroup.add(bracket);
+
+            // Lever arm — pivots at bracket, starts pointing UP
+            leverArm = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.035, 0.035, 0.7, 10),
+                new THREE.MeshStandardMaterial({color: 0x3A1A06, roughness: 0.8})
+            );
+            // Position arm so its bottom sits at the bracket
+            leverArm.position.set(0, 0.35, 0.25);
+            leverArm.userData.type = 'lever';
+            leverArm.userData.group = leverGroup;
+            leverGroup.add(leverArm);
+
+            // Gold knob at top
+            const knob = new THREE.Mesh(new THREE.SphereGeometry(0.12, 12, 10), bracketMat);
+            knob.position.set(0, 0.72, 0.25);
+            knob.userData.type = 'lever'; // also clickable
+            leverGroup.add(knob);
+            leverArm.userData.knob = knob;
+
+            leverObjects.push(leverArm);
+            grabbableObjects.push(leverArm);
+            grabbableObjects.push(knob); // click the knob too
+            // Also make the whole plate clickable as a large target
+            plate.userData.type = 'lever';
+            grabbableObjects.push(plate);
+
+            // Glowing indicator light — RED when not pulled, GREEN when pulled (visual feedback)
+            const leverLight = new THREE.PointLight(0xFF2020, 5.0, 6);
+            leverLight.position.set(0, 0, 0.5);
+            leverGroup.add(leverLight);
+            leverArm.userData.light = leverLight;
+
+        }
+
         function onSelectStart(event) {
             const controller = event.target;
             raycaster.setFromXRController(controller);
-
             const hits = raycaster.intersectObjects(grabbableObjects, true);
             if (hits.length > 0) {
                 const object = hits[0].object;
-
-                if (object.name === 'scarab' && gamePhase === 'corridor') {
-                    triggerPhase2();
-                } else {
-                    // Generic grab
-                    object.material.emissive = new THREE.Color(0x0044ff);
-                    object.material.emissiveIntensity = 0.5;
-                    controller.attach(object);
-                    controller.userData.selected = object;
+                // Lever: pull it down instead of attaching
+                let leverObj = object;
+                while (leverObj && !leverObj.userData.type) leverObj = leverObj.parent;
+                if (leverObj && leverObj.userData.type === 'lever') {
+                    scene.userData.leverPulled = true;
+                    scene.userData.leverT = 0;
+                    console.log('Lever pulled! (VR controller)');
+                    return;
                 }
+                controller.attach(object);
+                controller.userData.selected = object;
+                if(object.userData.type === 'scrollPiece') controller.userData.selectedType = 'scroll';
+                if(object.userData.type === 'weight') controller.userData.selectedType = 'weight';
             }
         }
 
         function onSelectEnd(event) {
             const controller = event.target;
-            if (controller.userData.selected !== undefined) {
-                const object = controller.userData.selected;
-                object.material.emissiveIntensity = 0;
-                scene.attach(object);
-                controller.userData.selected = undefined;
-            }
-        }
-
-        // -------------------------------------------------------------------
-        // WASD MOVEMENT — desktop testing only, remove before final submission
-        // -------------------------------------------------------------------
-        function handleKeyboard() {
-            const delta = 1 / 60;
-            const speed = 3.0;
-
-            const forward = new THREE.Vector3();
-            camera.getWorldDirection(forward);
-            forward.y = 0;
-            forward.normalize();
-
-            const right = new THREE.Vector3();
-            right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
-
-            if (keys['w'] || keys['arrowup'])    cameraRig.position.addScaledVector(forward,  speed * delta);
-            if (keys['s'] || keys['arrowdown'])  cameraRig.position.addScaledVector(forward, -speed * delta);
-            if (keys['a'] || keys['arrowleft'])  cameraRig.position.addScaledVector(right,   -speed * delta);
-            if (keys['d'] || keys['arrowright']) cameraRig.position.addScaledVector(right,    speed * delta);
-
-            // Q/E to rotate view on desktop
-            if (keys['q']) cameraRig.rotation.y += 0.02;
-            if (keys['e']) cameraRig.rotation.y -= 0.02;
-
-            // F key to trigger phase 2 (for testing without grabbing)
-            if (keys['f'] && gamePhase === 'corridor') {
-                triggerPhase2();
-                keys['f'] = false; // prevent repeat
-            }
-        }
-
-        // -------------------------------------------------------------------
-        // SMOOTH LOCOMOTION
-        // Left stick = move, Right stick = snap rotate 45°
-        // -------------------------------------------------------------------
-        function handleLocomotion() {
-            const session = renderer.xr.getSession();
-            if (!session) return;
-
-            const delta = 1 / 72;
-
-            for (const source of session.inputSources) {
-                if (!source.gamepad) continue;
-                const axes = source.gamepad.axes;
-
-                if (source.handedness === 'left') {
-                    const moveX = axes[2] ?? 0;
-                    const moveZ = axes[3] ?? 0;
-
-                    if (Math.abs(moveX) > 0.1 || Math.abs(moveZ) > 0.1) {
-                        const forward = new THREE.Vector3();
-                        camera.getWorldDirection(forward);
-                        forward.y = 0;
-                        forward.normalize();
-
-                        const right = new THREE.Vector3();
-                        right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
-
-                        cameraRig.position.addScaledVector(forward, -moveZ * moveSpeed * delta);
-                        cameraRig.position.addScaledVector(right,    moveX * moveSpeed * delta);
-                    }
-                }
-
-                if (source.handedness === 'right') {
-                    const rotX = axes[2] ?? 0;
-
-                    if (rotX > 0.7 && canSnapRight) {
-                        cameraRig.rotation.y -= snapAngle;
-                        canSnapRight = false;
-                    } else if (rotX < -0.7 && canSnapLeft) {
-                        cameraRig.rotation.y += snapAngle;
-                        canSnapLeft = false;
-                    }
-                    if (Math.abs(rotX) < 0.3) {
-                        canSnapLeft = true;
-                        canSnapRight = true;
-                    }
+            const obj = controller.userData.selected;
+            if (!obj) return;
+            scene.attach(obj);
+            const type = controller.userData.selectedType;
+            if (type === 'scroll') {
+                const target = scrollSnapTargets[obj.name];
+                if (target && obj.position.distanceTo(target) < 0.3) {
+                    obj.position.copy(target);
+                    obj.rotation.set(-Math.PI / 2, 0, 0);
+                    scrollSolved.add(obj.name);
+                    if (scrollSolved.size === 4) solveStation1();
                 }
             }
+            controller.userData.selected = undefined;
         }
 
-        // -------------------------------------------------------------------
-        // PEDESTAL SINK ANIMATION
-        // -------------------------------------------------------------------
-        function updatePedestal() {
-            if (!pedestalSinking) return;
-            if (pedestal.position.y > -1.5) {
-                pedestal.position.y -= 0.015;
-            } else {
-                pedestalSinking = false;
-            }
+        function solveStation1() {
+            station1Solved = true;
+            const s2Light = scene.getObjectByName('station2Light');
+            if (s2Light) s2Light.intensity = 4.5;
         }
 
-        // -------------------------------------------------------------------
-        // HOVER HIGHLIGHT
-        // -------------------------------------------------------------------
-        function updateHover() {
-            while (intersected.length) {
-                const obj = intersected.pop();
-                if (!obj.userData.grabbed) {
-                    obj.material.emissive = new THREE.Color(0x000000);
-                    obj.material.emissiveIntensity = 0;
-                }
-            }
-
-            [controller1, controller2].forEach(ctrl => {
-                if (ctrl.userData.selected) return;
-                raycaster.setFromXRController(ctrl);
-                const hits = raycaster.intersectObjects(grabbableObjects, true);
-                const line = ctrl.getObjectByName('line');
-
-                if (hits.length > 0) {
-                    const obj = hits[0].object;
-                    obj.material.emissive = new THREE.Color(0xff2200);
-                    obj.material.emissiveIntensity = 0.5;
-                    intersected.push(obj);
-                    if (line) line.scale.z = hits[0].distance;
-                } else {
-                    if (line) line.scale.z = 5;
-                }
-            });
-        }
-
-        // -------------------------------------------------------------------
-        // HELPERS — create geometry and add to scene or group
-        // -------------------------------------------------------------------
         function addBox(x, y, z, w, h, d, mat) {
             const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
             mesh.position.set(x, y, z);
+            mesh.receiveShadow = true;
             scene.add(mesh);
             return mesh;
         }
 
-        function addBoxTo(group, x, y, z, w, h, d, mat) {
-            const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+        function makeTextPanel(text, x, y, z, w, h) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512; canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#1a0800';
+            ctx.fillRect(0, 0, 512, 256);
+            ctx.fillStyle = '#FFD700';
+            ctx.font = 'bold 36px serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(text.split('\n')[0], 256, 100);
+            const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true }));
             mesh.position.set(x, y, z);
-            group.add(mesh);
-            return mesh;
+            scene.add(mesh);
         }
 
-        // -------------------------------------------------------------------
-        // TORCH HELPERS
-        // -------------------------------------------------------------------
         function placeTorch(parent, x, y, z, lightIntensity = 1.5) {
             if (!torchTemplate) {
                 pendingTorchPlacements.push({ parent, x, y, z, lightIntensity });
@@ -479,55 +1435,166 @@
             }
             const torch = torchTemplate.clone();
             torch.position.set(x, y, z);
-            if (x < 0) torch.rotation.y = Math.PI / 2;
-            if (x > 0) torch.rotation.y = -Math.PI / 2;
             parent.add(torch);
 
-            // Custom flame sphere on top of torch head
-            const flameMat = new THREE.MeshStandardMaterial({
-                color: 0xFF6600,
-                emissive: new THREE.Color(0xFF4400),
-                emissiveIntensity: 1.0
-            });
-            const flame = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 8), flameMat);
-            flame.position.set(x, y + 0.3, z);
-            parent.add(flame);
-
-            // Point light
-            const light = new THREE.PointLight(0xff5500, lightIntensity, 6);
-            light.position.set(x, y + 0.35, z);
+            // Main warm torch light
+            const light = new THREE.PointLight(0xFF5500, lightIntensity, 14);
+            light.position.set(x, y + 0.4, z);
+            light.castShadow = true;
+            light.shadow.mapSize.width  = 256;
+            light.shadow.mapSize.height = 256;
             parent.add(light);
+
+            // Secondary subtle fill — slightly cooler colour for depth
+            const fill = new THREE.PointLight(0xFF2200, lightIntensity * 0.35, 8);
+            fill.position.set(x, y + 0.1, z);
+            parent.add(fill);
+
+            // Register both for flicker with individual random phase offset
+            torchLights.push({ light, fill, baseIntensity: lightIntensity, phase: Math.random() * Math.PI * 2 });
         }
 
-        function spawnTorch(parent, x, y, z) {
-            placeTorch(parent, x, y, z, 1.5);
+        function spawnTorch(parent, x, y, z) { placeTorch(parent, x, y, z, 1.5); }
+
+        function handleKeyboard() {
+            const delta = 1 / 60;
+            const speed = 3.0;
+            const forward = new THREE.Vector3();
+            camera.getWorldDirection(forward);
+            forward.y = 0; forward.normalize();
+            const right = new THREE.Vector3();
+            right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+            if (keys['w']) cameraRig.position.addScaledVector(forward,  speed * delta);
+            if (keys['s']) cameraRig.position.addScaledVector(forward, -speed * delta);
+            if (keys['a']) cameraRig.position.addScaledVector(right,   -speed * delta);
+            if (keys['d']) cameraRig.position.addScaledVector(right,    speed * delta);
+            // Press E or SPACE to pull the lever (desktop fallback)
+            if ((keys['e'] || keys[' ']) && !scene.userData.leverPulled) {
+                scene.userData.leverPulled = true;
+                scene.userData.leverT = 0;
+                console.log('Lever pulled! (keyboard E/SPACE)');
+            }
         }
 
-        function spawnTorchTo(group, x, y, z, dark = false) {
-            placeTorch(group, x, y, z, dark ? 0 : 1.5);
+        function handleLocomotion() {
+            const session = renderer.xr.getSession();
+            if (!session) return;
+            const delta = 1 / 72;
+            for (const source of session.inputSources) {
+                if (!source.gamepad) continue;
+                const axes = source.gamepad.axes;
+                if (source.handedness === 'left') {
+                    const moveX = axes[2] ?? 0;
+                    const moveZ = axes[3] ?? 0;
+                    const forward = new THREE.Vector3();
+                    camera.getWorldDirection(forward);
+                    forward.y = 0; forward.normalize();
+                    const right = new THREE.Vector3();
+                    right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+                    cameraRig.position.addScaledVector(forward, -moveZ * moveSpeed * delta);
+                    cameraRig.position.addScaledVector(right,    moveX * moveSpeed * delta);
+                }
+                if (source.handedness === 'right') {
+                    const rotX = axes[2] ?? 0;
+                    if (rotX > 0.7 && canSnapRight) { cameraRig.rotation.y -= snapAngle; canSnapRight = false; }
+                    else if (rotX < -0.7 && canSnapLeft) { cameraRig.rotation.y += snapAngle; canSnapLeft = false; }
+                    if (Math.abs(rotX) < 0.3) { canSnapLeft = true; canSnapRight = true; }
+                }
+            }
         }
 
-        // -------------------------------------------------------------------
-        // WINDOW RESIZE
-        // -------------------------------------------------------------------
         function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
-        // -------------------------------------------------------------------
-        // ANIMATE LOOP
-        // -------------------------------------------------------------------
         function animate() {
             handleKeyboard();
             handleLocomotion();
-            updatePedestal();
-            updateHover();
+
+            // === TORCH FLICKER ===
+            const t = performance.now() * 0.001; // seconds
+            torchLights.forEach(({ light, fill, baseIntensity, phase }) => {
+                // Layered sin waves at different frequencies = organic flicker
+                const flicker =
+                    Math.sin(t * 7.3  + phase)        * 0.18 +
+                    Math.sin(t * 13.7 + phase * 1.3)  * 0.10 +
+                    Math.sin(t * 3.1  + phase * 0.7)  * 0.08 +
+                    Math.random()                      * 0.06; // tiny random spike
+                light.intensity = Math.max(0, baseIntensity * (1.0 + flicker));
+                fill.intensity  = Math.max(0, baseIntensity * 0.35 * (1.0 + flicker * 0.5));
+
+                // Slight colour temperature shift — flicker between orange and deep amber
+                const r = Math.min(1, 1.0);
+                const g = Math.max(0.18, 0.30 + flicker * 0.15);
+                light.color.setRGB(r, g, 0.02);
+            });
+
+            // === COLLISION: block player from walking through closed door ===
+            // Check if door is lifted enough to walk under (lift > 2.5 means door is mostly up)
+            if (scene.userData.DOOR_Z !== undefined) {
+                const doorLift = scene.userData.doorSlab ? (scene.userData.doorSlab.position.y - scene.userData.doorSlab.userData.closedY) : 0;
+                if (doorLift < 2.5 && cameraRig.position.z > scene.userData.DOOR_Z - 0.5) {
+                    cameraRig.position.z = scene.userData.DOOR_Z - 0.5;
+                }
+            }
+
+            // === LEVER ANIMATION ===
+            if (scene.userData.leverPulled && leverArm && (scene.userData.leverT || 0) < 1) {
+                scene.userData.leverT = Math.min(1, (scene.userData.leverT || 0) + 0.025);
+                const lt = scene.userData.leverT;
+                const angle = lt * Math.PI * 0.5;
+                // Arm pivots from its BASE (bracket), which is at local y=0, z=0.25
+                // Move arm so its base is at local y=0 then rotate, then reposition
+                const L = 0.35; // half-arm length
+                leverArm.position.set(0, L * Math.cos(angle), 0.25 + L * Math.sin(angle));
+                leverArm.rotation.x = angle;
+                // Knob follows the top of the arm
+                if (leverArm.userData.knob) {
+                    leverArm.userData.knob.position.set(
+                        0,
+                        (2 * L) * Math.cos(angle),
+                        0.25 + (2 * L) * Math.sin(angle)
+                    );
+                }
+                // Switch indicator light from red to green
+                if (leverArm.userData.light) {
+                    leverArm.userData.light.color.setHex(0x20FF20);
+                }
+            }
+
+            // === BACKGROUND: show Egypt sky once lever is pulled (door opening = sky visible) ===
+            if (scene.userData.egyptStartZ !== undefined) {
+                if (scene.userData.leverPulled) {
+                    // Lever pulled → door opening → show Egypt sky
+                    scene.fog = null;
+                    scene.background = scene.userData.egyptBg || new THREE.Color(0x4A9AE8);
+                } else {
+                    // Still locked in tomb
+                    if (!scene.fog) scene.fog = new THREE.FogExp2(0x0A0402, 0.018);
+                    scene.background = scene.userData.tombBg || new THREE.Color(0x0A0402);
+                }
+            }
+
+            // === DOOR ANIMATION — slab slides UP when lever pulled (portcullis) ===
+            if (scene.userData.doorSlab) {
+                if (scene.userData.leverPulled && !scene.userData.doorOpen) {
+                    scene.userData.doorOpen = true;
+                }
+                if (scene.userData.doorOpen && scene.userData.doorT < 1) {
+                    scene.userData.doorT = Math.min(1, scene.userData.doorT + 0.018);
+                    const t = scene.userData.doorT;
+                    // Ease-out for smooth stop at top
+                    const ease = 1 - Math.pow(1 - t, 2);
+                    const lift = ease * 4.0; // total lift distance
+                    scene.userData.doorSlab.position.y = scene.userData.doorSlab.userData.closedY + lift;
+                }
+            }
+
             renderer.render(scene, camera);
         }
 
     </script>
 </body>
-
 </html>
