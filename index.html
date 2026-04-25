@@ -16,7 +16,7 @@
     <script type="importmap">
         {
             "imports": {
-                "three": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.module.js",
+                "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
                 "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.1/examples/jsm/"
             }
         }
@@ -160,10 +160,11 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.setAnimationLoop(animate);
             renderer.xr.enabled = true;
-            renderer.shadowMap.enabled = true;
-            
+           // julio change, laggy: changed true to false here and commended the next line of code
+            renderer.shadowMap.enabled = false;
+        
             // Enhanced shadows for contrast
-            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+           // renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
             document.body.appendChild(renderer.domElement);
             document.body.appendChild(VRButton.createButton(renderer));
