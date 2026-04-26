@@ -27,7 +27,10 @@
         import * as THREE from 'three';
         import { VRButton } from 'three/addons/webxr/VRButton.js';
         import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
-        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { initPuzzle1, puzzle1TryGrab, puzzle1TryRelease, puzzle1UpdateHover } from './puzzle1.js';
+
+
+        
 
         // -------------------------------------------------------------------
         // GLOBALS
@@ -153,7 +156,9 @@
             buildStation4(); 
             buildLever();
             buildWallPaintings();
-            buildEgyptExit();
+            
+            //adding puzzle 1 here :3
+            initPuzzle1(scene, camera, renderer);
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setPixelRatio(window.devicePixelRatio);
@@ -1362,7 +1367,8 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
 
         function onSelectStart(event) {
             const controller = event.target;
-            raycaster.setFromXRController(controller);
+           
+            if (puzzle1TryGrab(controller, raycaster)) return;
             const hits = raycaster.intersectObjects(grabbableObjects, true);
             if (hits.length > 0) {
                 const object = hits[0].object;
@@ -1385,6 +1391,8 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
         function onSelectEnd(event) {
             const controller = event.target;
             const obj = controller.userData.selected;
+            if (puzzle1TryRelease(controller)) return;
+
             if (!obj) return;
             scene.attach(obj);
             const type = controller.userData.selectedType;
@@ -1593,6 +1601,7 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
                 }
             }
 
+            puzzle1UpdateHover([controller1, controller2], raycaster);
             renderer.render(scene, camera);
         }
 
