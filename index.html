@@ -16,8 +16,8 @@
     <script type="importmap">
         {
             "imports": {
-                "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
-                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.1/examples/jsm/"
+                "three": "https://cdn.jsdelivr.net/npm/three@0.172.0/build/three.module.js",
+"three/addons/": "https://cdn.jsdelivr.net/npm/three@0.172.0/examples/jsm/"
             }
         }
     </script>
@@ -26,11 +26,8 @@
 
         import * as THREE from 'three';
         import { VRButton } from 'three/addons/webxr/VRButton.js';
-        import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
-        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-        import { initPuzzle1, puzzle1TryGrab, puzzle1TryRelease, puzzle1UpdateHover } from './puzzle1.js';
-
-
+       import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { initPuzzle1, puzzle1TryGrab, puzzle1TryRelease, puzzle1UpdateHover } from './puzzle1.js';
         
 
         // -------------------------------------------------------------------
@@ -157,23 +154,21 @@
             buildStation4(); 
             buildLever();
             buildWallPaintings();
-            
-        
-
+            buildEgyptExit();
+initPuzzle1(scene, camera, renderer);
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.setAnimationLoop(animate);
             renderer.xr.enabled = true;
-           // julio change, laggy: changed true to false here and commended the next line of code
-            renderer.shadowMap.enabled = false;
-        
+            renderer.shadowMap.enabled = true;
+            
             // Enhanced shadows for contrast
-           // renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
             document.body.appendChild(renderer.domElement);
             document.body.appendChild(VRButton.createButton(renderer));
-initPuzzle1(scene, camera, renderer);
+
             raycaster = new THREE.Raycaster();
 
             controller1 = renderer.xr.getController(0);
@@ -233,7 +228,7 @@ initPuzzle1(scene, camera, renderer);
         function buildCorridor() {
             // Match tomb room materials exactly
             const floorMat = new THREE.MeshStandardMaterial({ color: 0x3D2515, roughness: 0.95 });
-            const wallMat  = new THREE.MeshStandardMaterial({ color: 0x4A2D18, roughness: 0.9  });
+            const wallMat  = new THREE.MeshStandardMaterial({ color: 0x080400, roughness: 1.0, metalness: 0 });
             const ceilMat  = new THREE.MeshStandardMaterial({ color: 0x150A04, roughness: 1.0  });
 
             // Corridor box: z range [-9 to +7], width 4 (x: -2 to +2), height 3.5
@@ -257,9 +252,9 @@ initPuzzle1(scene, camera, renderer);
         function buildTombRoom() {
             // Stone materials — warm brownish-red like the reference
             const floorMat   = new THREE.MeshStandardMaterial({ color: 0x080400, roughness: 1.0, metalness: 0 });  // match ceiling darkness
-            const wallMat    = new THREE.MeshStandardMaterial({ color: 0x4A2D18, roughness: 0.9  });
+            const wallMat    = new THREE.MeshStandardMaterial({ color: 0x080400, roughness: 1.0, metalness: 0 });  // same as ceiling
             const ceilMat    = new THREE.MeshStandardMaterial({ color: 0x080400, roughness: 1.0, metalness: 0 });
-            const backWallMat = new THREE.MeshStandardMaterial({ color: 0x5A3520, roughness: 0.85, emissive: 0x3A1A08, emissiveIntensity: 0.4 });
+            const backWallMat = new THREE.MeshStandardMaterial({ color: 0x080400, roughness: 1.0, metalness: 0 });  // same as ceiling
             const exteriorMat = new THREE.MeshStandardMaterial({ color: 0x8B6020, roughness: 1.0 }); // sandstone outside
 
             // ── Exterior: solid sandstone building that wraps both tomb and corridor ──
@@ -1367,7 +1362,7 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
 
         function onSelectStart(event) {
             const controller = event.target;
-           raycaster.setFromXRController(controller);
+            raycaster.setFromXRController(controller);
             if (puzzle1TryGrab(controller, raycaster)) return;
             const hits = raycaster.intersectObjects(grabbableObjects, true);
             if (hits.length > 0) {
@@ -1392,7 +1387,6 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
             const controller = event.target;
             const obj = controller.userData.selected;
             if (puzzle1TryRelease(controller)) return;
-
             if (!obj) return;
             scene.attach(obj);
             const type = controller.userData.selectedType;
@@ -1600,8 +1594,7 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
                     scene.userData.doorSlab.position.y = scene.userData.doorSlab.userData.closedY + lift;
                 }
             }
-
-            puzzle1UpdateHover([controller1, controller2], raycaster);
+puzzle1UpdateHover([controller1, controller2], raycaster);
             renderer.render(scene, camera);
         }
 

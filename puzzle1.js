@@ -22,21 +22,21 @@ const PIECE_FILES = [
 ];
 
 const SNAP_POSITIONS = [
-    new THREE.Vector3(-1.45,  1.04,  -3.0),  // 1
-    new THREE.Vector3(-1.92,  1.0,   -2.7),  // 2
-    new THREE.Vector3(-1.25,  0.7,   -3.05), // 3
-    new THREE.Vector3(-1.85,  0.7,   -2.65), // 4
-    new THREE.Vector3(-1.87,  0.852, -2.7),  // 5
-    new THREE.Vector3(-1.74,  1.145, -2.81), // 6
+    new THREE.Vector3(-8.8, 2.8,  -11.0),
+    new THREE.Vector3(-8.8, 2.8,  -12.0),
+    new THREE.Vector3(-8.8, 2.45, -11.0),
+    new THREE.Vector3(-8.8, 2.45, -12.0),
+    new THREE.Vector3(-8.8, 2.1,  -11.0),
+    new THREE.Vector3(-8.8, 2.1,  -12.0),
 ];
 
 const START_POSITIONS = [
-    new THREE.Vector3(-1.7, 1, -1.5),
-    new THREE.Vector3(-1.7, 1, -1.5),
-    new THREE.Vector3(-1.7, 1, -1.8),
-    new THREE.Vector3(-1.7, 1, -1.8),
-    new THREE.Vector3(-1.7, 1, -2.1),
-    new THREE.Vector3(-1.7, 1, -2.1),
+    new THREE.Vector3(-6.3, 1.05, -11.7),
+    new THREE.Vector3(-5.8, 1.05, -11.7),
+    new THREE.Vector3(-6.3, 1.05, -12.0),
+    new THREE.Vector3(-5.8, 1.05, -12.0),
+    new THREE.Vector3(-6.3, 1.05, -12.3),
+    new THREE.Vector3(-5.8, 1.05, -12.3),
 ];
 
 // -------------------------------------------------------------------
@@ -123,37 +123,6 @@ export function puzzle1UpdateHover(controllers, raycaster) {
             }
         }
     });
-
-    controllers.forEach(ctrl => {
-        if (ctrl.userData.heldPiece) return;
-        raycaster.setFromXRController(ctrl);
-
-        const meshes = [];
-        pieces.forEach(p => {
-            if (!p.userData.snapped) {
-                p.traverse(c => { if (c.isMesh) meshes.push(c); });
-            }
-        });
-
-        const hits = raycaster.intersectObjects(meshes, true);
-        const line = ctrl.getObjectByName('line');
-
-        if (hits.length > 0) {
-            const piece = getParentPiece(hits[0].object);
-            if (piece) {
-                piece.traverse(c => {
-                    if (c.isMesh) {
-                        c.material = c.material.clone();
-                        c.material.emissive = new THREE.Color(0xFFDD00);
-                        c.material.emissiveIntensity = 0.6;
-                    }
-                });
-            }
-            if (line) line.scale.z = hits[0].distance;
-        } else {
-            if (line) line.scale.z = 5;
-        }
-    });
 }
 
 // -------------------------------------------------------------------
@@ -163,11 +132,11 @@ function buildTable() {
     const top = new THREE.MeshStandardMaterial({ color: 0x7A5C3A, roughness: 0.8 });
     const leg = new THREE.MeshStandardMaterial({ color: 0x5C3D1E, roughness: 1.0 });
 
-    addBox(-0.15, 1.0, -1.8,  1.0, 0.08, 1.0, top);
-    addBox(-0.55, 0.50, -1.4,  0.08, 1.0, 0.08, leg);
-    addBox( 0.25, 0.50, -1.4,  0.08, 1.0, 0.08, leg);
-    addBox(-0.55, 0.50, -2.2,  0.08, 1.0, 0.08, leg);
-    addBox( 0.25, 0.50, -2.2,  0.08, 1.0, 0.08, leg);
+   addBox(-6,   0.92, -12,   1.0, 0.08, 1.0, top);  // table top
+addBox(-6.45, 0.46, -11.55, 0.08, 0.9, 0.08, leg); // leg 1
+addBox(-5.55, 0.46, -11.55, 0.08, 0.9, 0.08, leg); // leg 2
+addBox(-6.45, 0.46, -12.45, 0.08, 0.9, 0.08, leg); // leg 3
+addBox(-5.55, 0.46, -12.45, 0.08, 0.9, 0.08, leg); // leg 4
 }
 
 function buildTabletFrame() {
@@ -179,7 +148,8 @@ function buildTabletFrame() {
         opacity: 0.35,
     });
     const frame = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.85, 0.02), frameMat);
-    frame.position.set(0, 1.5, -3.0);
+    frame.position.set(-8.78, 2.45, -11.5);
+frame.rotation.y = Math.PI / 2;
     _scene.add(frame);
 
     const glow = new THREE.PointLight(0xFFAA00, 1.0, 3);
