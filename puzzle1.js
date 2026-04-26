@@ -9,7 +9,7 @@ let piecesPlaced = 0;
 const TOTAL_PIECES = 6;
 
 // Where the full tablet appears on the wall (assembled position center)
-const TABLET_CENTER = new THREE.Vector3(-7.5, 1.4, -13.8);
+const TABLET_CENTER = new THREE.Vector3(-7.5, 1.4, -14.8);
 const TABLET_W = 2.0;   // total width
 const TABLET_H = 1.1;   // total height
 const THICKNESS = 0.08; // stone thickness
@@ -31,12 +31,12 @@ const PIECE_DEFS = [
 
 // Scatter positions on the table
 const START_POSITIONS = [
-    new THREE.Vector3(-5.5, 1.05, -11.5),
-    new THREE.Vector3(-6.3, 1.05, -11.7),
-    new THREE.Vector3(-5.7, 1.05, -12.0),
-    new THREE.Vector3(-6.1, 1.05, -12.3),
-    new THREE.Vector3(-5.4, 1.05, -12.5),
-    new THREE.Vector3(-6.4, 1.05, -11.3),
+    new THREE.Vector3(-5.5, 1.05, -12.5),
+    new THREE.Vector3(-6.3, 1.05, -12.7),
+    new THREE.Vector3(-5.7, 1.05, -13.0),
+    new THREE.Vector3(-6.1, 1.05, -13.3),
+    new THREE.Vector3(-5.4, 1.05, -13.5),
+    new THREE.Vector3(-6.4, 1.05, -12.3),
 ];
 
 // -------------------------------------------------------------------
@@ -44,7 +44,7 @@ const START_POSITIONS = [
 // -------------------------------------------------------------------
 export function initPuzzle1(scene, camera, renderer) {
     _scene = scene;
-    buildTable();
+    //buildTable();
     buildTabletOutline();
     loadAndBuildPieces();
     createProgressUI();
