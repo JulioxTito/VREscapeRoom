@@ -22,14 +22,13 @@ const PIECE_FILES = [
 ];
 
 const SNAP_POSITIONS = [
-    new THREE.Vector3(-8.8, 2.8,  -11.0),
-    new THREE.Vector3(-8.8, 2.8,  -12.0),
-    new THREE.Vector3(-8.8, 2.45, -11.0),
-    new THREE.Vector3(-8.8, 2.45, -12.0),
-    new THREE.Vector3(-8.8, 2.1,  -11.0),
-    new THREE.Vector3(-8.8, 2.1,  -12.0),
+    new THREE.Vector3(-7.35, 1.54, -13.7),
+    new THREE.Vector3(-7.82, 1.5,  -13.4),
+    new THREE.Vector3(-7.15, 1.2,  -13.75),
+    new THREE.Vector3(-7.75, 1.2,  -13.35),
+    new THREE.Vector3(-7.77, 1.35, -13.4),
+    new THREE.Vector3(-7.64, 1.64, -13.51),
 ];
-
 const START_POSITIONS = [
     new THREE.Vector3(-6.3, 1.05, -11.7),
     new THREE.Vector3(-5.8, 1.05, -11.7),
@@ -94,6 +93,10 @@ export function puzzle1TryRelease(controller) {
     const piece = controller.userData.heldPiece;
     if (!piece) return false;
 
+    // Get world position BEFORE detaching
+    const worldPos = new THREE.Vector3();
+    piece.getWorldPosition(worldPos);
+
     _scene.attach(piece);
     controller.userData.heldPiece = undefined;
 
@@ -101,7 +104,7 @@ export function puzzle1TryRelease(controller) {
         if (c.isMesh) c.material.emissiveIntensity = 0;
     });
 
-    trySnap(piece);
+    trySnap(piece, worldPos);
     return true;
 }
 
@@ -167,7 +170,7 @@ frame.rotation.y = Math.PI / 2;
         });
         const slot = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.28, 0.01), slotMat);
         slot.position.copy(pos);
-        slot.position.z = -4.88;
+slot.rotation.y = Math.PI / 2;
         _scene.add(slot);
     });
 }
@@ -201,9 +204,11 @@ function getParentPiece(obj) {
     return null;
 }
 
-function trySnap(piece) {
-    const worldPos = new THREE.Vector3();
-    piece.getWorldPosition(worldPos);
+function trySnap(piece, worldPos) {
+    if (!worldPos) {
+        worldPos = new THREE.Vector3();
+        piece.getWorldPosition(worldPos);
+    }
     const target = SNAP_POSITIONS[piece.userData.index];
     const dist   = worldPos.distanceTo(target);
 

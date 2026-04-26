@@ -25,7 +25,8 @@
     <script type="module">
 
         import * as THREE from 'three';
-        import { VRButton } from 'three/addons/webxr/VRButton.js';
+      import { VRButton } from 'three/addons/webxr/VRButton.js';
+import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { initPuzzle1, puzzle1TryGrab, puzzle1TryRelease, puzzle1UpdateHover } from './puzzle1.js';
         
@@ -571,6 +572,7 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
     console.log('Cat pharaohs placed successfully.');
 }, undefined, err => console.error('Pharaoh LOAD ERROR:', err));
         }
+// station 1, edit
 
         function buildStation1() {
     const tableMat = new THREE.MeshStandardMaterial({ color: 0x7A6A50, roughness: 0.7 });
@@ -587,7 +589,7 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
         scene.add(leg);
     });
 
-    makeTextPanel('STATION 1\nAssemble the scroll', -6, 1.8, -12, 0.8, 0.35);
+    makeTextPanel('STATION 1\nAssemble the scroll', -6, 1.8, -14, 0.8, 0.35);
 
     const colors = [0xD4A96A, 0xC8985E, 0xDDB87A, 0xBF8A50];
     colors.forEach((color, i) => {
