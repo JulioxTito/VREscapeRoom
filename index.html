@@ -1463,7 +1463,7 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
 
         function handleKeyboard() {
             const delta = 1 / 60;
-            const speed = 3.0;
+            const speed = 0.15;
             const forward = new THREE.Vector3();
             camera.getWorldDirection(forward);
             forward.y = 0; forward.normalize();

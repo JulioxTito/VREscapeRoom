@@ -10,7 +10,7 @@ const pieces = [];
 let piecesPlaced = 0;
 let _scene, _camera, _renderer;
 
-const SNAP_DISTANCE = 9999;
+const SNAP_DISTANCE = 0.05;
 
 const PIECE_FILES = [
     'Assets/Models/Tablet/piece1.glb',
