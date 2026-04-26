@@ -1,60 +1,57 @@
-// puzzle1.js — Broken Tablet Puzzle
-// Usage in index.html: import { initPuzzle1 } from './puzzle1.js';
-// Then call: initPuzzle1(scene, camera, renderer) inside init()
+// puzzle1.js — Broken Tablet Puzzle (Flat Plane approach)
+// Import in index.html and call initPuzzle1(scene, camera, renderer)
 
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-const loader = new GLTFLoader();
+let _scene;
 const pieces = [];
 let piecesPlaced = 0;
-let _scene, _camera, _renderer;
+const TOTAL_PIECES = 6;
 
-const SNAP_DISTANCE = 0.05;
+// Where the full tablet appears on the wall (assembled position center)
+const TABLET_CENTER = new THREE.Vector3(-7.5, 1.4, -13.8);
+const TABLET_W = 2.0;   // total width
+const TABLET_H = 1.1;   // total height
+const THICKNESS = 0.08; // stone thickness
 
-const PIECE_FILES = [
-    'Assets/Models/Tablet/piece1.glb',
-    'Assets/Models/Tablet/piece2.glb',
-    'Assets/Models/Tablet/piece3.glb',
-    'Assets/Models/Tablet/piece4.glb',
-    'Assets/Models/Tablet/piece5.glb',
-    'Assets/Models/Tablet/piece6.glb',
+// Grid: 6 columns, 3 rows
+const GRID_COLS = 6;
+const GRID_ROWS = 3;
+
+// Piece definitions: [colStart, rowStart, colSpan, rowSpan]
+// Irregular sizes so pieces look naturally broken
+const PIECE_DEFS = [
+    [0, 0, 2, 1],  // piece 0 — top left
+    [2, 0, 2, 2],  // piece 1 — top middle (tall)
+    [4, 0, 2, 1],  // piece 2 — top right
+    [0, 1, 2, 2],  // piece 3 — left (tall)
+    [4, 1, 2, 2],  // piece 4 — right (tall)
+    [2, 2, 2, 1],  // piece 5 — bottom middle
 ];
 
-const SNAP_POSITIONS = [
-    new THREE.Vector3(-7.35, 1.54, -13.7),
-    new THREE.Vector3(-7.82, 1.5,  -13.4),
-    new THREE.Vector3(-7.15, 1.2,  -13.75),
-    new THREE.Vector3(-7.75, 1.2,  -13.35),
-    new THREE.Vector3(-7.77, 1.35, -13.4),
-    new THREE.Vector3(-7.64, 1.64, -13.51),
-];
+// Scatter positions on the table
 const START_POSITIONS = [
+    new THREE.Vector3(-5.5, 1.05, -11.5),
     new THREE.Vector3(-6.3, 1.05, -11.7),
-    new THREE.Vector3(-5.8, 1.05, -11.7),
-    new THREE.Vector3(-6.3, 1.05, -12.0),
-    new THREE.Vector3(-5.8, 1.05, -12.0),
-    new THREE.Vector3(-6.3, 1.05, -12.3),
-    new THREE.Vector3(-5.8, 1.05, -12.3),
+    new THREE.Vector3(-5.7, 1.05, -12.0),
+    new THREE.Vector3(-6.1, 1.05, -12.3),
+    new THREE.Vector3(-5.4, 1.05, -12.5),
+    new THREE.Vector3(-6.4, 1.05, -11.3),
 ];
 
 // -------------------------------------------------------------------
-// MAIN EXPORT — call this from index.html init()
+// MAIN EXPORT
 // -------------------------------------------------------------------
 export function initPuzzle1(scene, camera, renderer) {
-    _scene    = scene;
-    _camera   = camera;
-    _renderer = renderer;
-
+    _scene = scene;
     buildTable();
-    buildTabletFrame();
-    loadAllPieces();
+    buildTabletOutline();
+    loadAndBuildPieces();
     createProgressUI();
 }
 
 // -------------------------------------------------------------------
-// Called from index.html onSelectStart — pass the hit object
-// Returns true if a piece was grabbed (so index knows to skip other logic)
+// GRAB / RELEASE
 // -------------------------------------------------------------------
 export function puzzle1TryGrab(controller, raycaster) {
     if (pieces.length === 0) return false;
@@ -68,68 +65,49 @@ export function puzzle1TryGrab(controller, raycaster) {
 
     const hits = raycaster.intersectObjects(meshes, true);
     if (hits.length > 0) {
-        const piece = getParentPiece(hits[0].object);
-        if (piece && !piece.userData.snapped) {
-            piece.traverse(c => {
+        let obj = hits[0].object;
+        while (obj && !obj.userData.isPiece) obj = obj.parent;
+        if (obj && !obj.userData.snapped) {
+            obj.traverse(c => {
                 if (c.isMesh) {
                     c.material = c.material.clone();
                     c.material.emissive = new THREE.Color(0x6600CC);
-                    c.material.emissiveIntensity = 0.6;
+                    c.material.emissiveIntensity = 0.5;
                 }
             });
-            // Don't attach to controller — just mark as selected
-            controller.userData.heldPiece = piece;
+            controller.attach(obj);
+            controller.userData.heldPiece = obj;
             return true;
         }
     }
     return false;
 }
 
-// -------------------------------------------------------------------
-// Called from index.html onSelectEnd
-// Returns true if a piece was released
-// -------------------------------------------------------------------
 export function puzzle1TryRelease(controller) {
     const piece = controller.userData.heldPiece;
     if (!piece) return false;
 
+    const worldPos = new THREE.Vector3();
+    piece.getWorldPosition(worldPos);
+
+    _scene.attach(piece);
     controller.userData.heldPiece = undefined;
 
     piece.traverse(c => {
         if (c.isMesh) c.material.emissiveIntensity = 0;
     });
 
-    // Always snap to target position
-    const target = SNAP_POSITIONS[piece.userData.index];
-    piece.position.copy(target);
-    piece.userData.snapped = true;
+    const snapPos = getSnapPosition(piece.userData.index);
+    const dist = worldPos.distanceTo(snapPos);
 
-    piece.traverse(c => {
-        if (c.isMesh) {
-            c.material = c.material.clone();
-            c.material.emissive = new THREE.Color(0xFFAA00);
-            c.material.emissiveIntensity = 1.0;
-        }
-    });
-    setTimeout(() => {
-        piece.traverse(c => {
-            if (c.isMesh) c.material.emissiveIntensity = 0.15;
-        });
-    }, 800);
-
-    piecesPlaced++;
-    const el = document.getElementById('p1-progress');
-    if (el) el.textContent = `${piecesPlaced} / 6 pieces placed`;
-    if (piecesPlaced >= 6) onPuzzleSolved();
+    if (dist < 1.2) {
+        snapPiece(piece);
+    }
 
     return true;
 }
 
-// -------------------------------------------------------------------
-// Called from index.html animate() loop for hover highlight
-// -------------------------------------------------------------------
 export function puzzle1UpdateHover(controllers, raycaster) {
-    // Clear highlights on unsnapped unheld pieces
     pieces.forEach(p => {
         if (!p.userData.snapped) {
             const isHeld = controllers.some(c => c.userData.heldPiece === p);
@@ -146,115 +124,191 @@ export function puzzle1UpdateHover(controllers, raycaster) {
 }
 
 // -------------------------------------------------------------------
-// INTERNAL FUNCTIONS
+// SNAP
+// -------------------------------------------------------------------
+function getSnapPosition(index) {
+    const def = PIECE_DEFS[index];
+    const cellW = TABLET_W / GRID_COLS;
+    const cellH = TABLET_H / GRID_ROWS;
+    const px = TABLET_CENTER.x + (def[0] + def[2] / 2 - GRID_COLS / 2) * cellW;
+    const py = TABLET_CENTER.y + (GRID_ROWS / 2 - def[1] - def[3] / 2) * cellH;
+    return new THREE.Vector3(px, py, TABLET_CENTER.z);
+}
+
+function snapPiece(piece) {
+    const snapPos = getSnapPosition(piece.userData.index);
+    piece.position.copy(snapPos);
+    piece.rotation.set(0, 0, 0);
+    piece.userData.snapped = true;
+
+    // Hide snap dot
+    const dot = _scene.getObjectByName(`snapDot_${piece.userData.index}`);
+    if (dot) dot.visible = false;
+
+    // Gold flash
+    piece.traverse(c => {
+        if (c.isMesh) {
+            c.material = c.material.clone();
+            c.material.emissive = new THREE.Color(0xFFAA00);
+            c.material.emissiveIntensity = 1.0;
+        }
+    });
+    setTimeout(() => {
+        piece.traverse(c => {
+            if (c.isMesh) c.material.emissiveIntensity = 0;
+        });
+    }, 600);
+
+    piecesPlaced++;
+    const el = document.getElementById('p1-progress');
+    if (el) el.textContent = `${piecesPlaced} / ${TOTAL_PIECES} pieces placed`;
+    if (piecesPlaced >= TOTAL_PIECES) onPuzzleSolved();
+}
+
+// -------------------------------------------------------------------
+// BUILD PIECES from texture
+// -------------------------------------------------------------------
+function loadAndBuildPieces() {
+    const texLoader = new THREE.TextureLoader();
+    texLoader.load('textures/tablet_image.png', (tex) => {
+        tex.colorSpace = THREE.SRGBColorSpace;
+
+        PIECE_DEFS.forEach((def, index) => {
+            const [colStart, rowStart, colSpan, rowSpan] = def;
+
+            const cellW = TABLET_W / GRID_COLS;
+            const cellH = TABLET_H / GRID_ROWS;
+            const pw = cellW * colSpan;
+            const ph = cellH * rowSpan;
+
+            // UV for this piece
+            const uOffset = colStart / GRID_COLS;
+            const vOffset = 1 - (rowStart + rowSpan) / GRID_ROWS;
+            const uRepeat = colSpan / GRID_COLS;
+            const vRepeat = rowSpan / GRID_ROWS;
+
+            const pieceTex = tex.clone();
+            pieceTex.needsUpdate = true;
+            pieceTex.offset.set(uOffset, vOffset);
+            pieceTex.repeat.set(uRepeat, vRepeat);
+
+            const frontMat = new THREE.MeshStandardMaterial({
+                map: pieceTex,
+                roughness: 0.8,
+            });
+            const stoneMat = new THREE.MeshStandardMaterial({
+                color: 0x8B7355,
+                roughness: 1.0,
+            });
+            const backMat = new THREE.MeshStandardMaterial({
+                color: 0x6B5A3E,
+                roughness: 1.0,
+            });
+
+            const group = new THREE.Group();
+            group.userData.isPiece = true;
+            group.userData.index = index;
+            group.userData.snapped = false;
+
+            // Front face
+            const front = new THREE.Mesh(new THREE.PlaneGeometry(pw, ph), frontMat);
+            front.position.z = THICKNESS / 2;
+            group.add(front);
+
+            // Back face
+            const back = new THREE.Mesh(new THREE.PlaneGeometry(pw, ph), backMat);
+            back.position.z = -THICKNESS / 2;
+            back.rotation.y = Math.PI;
+            group.add(back);
+
+            // Edges (thickness)
+            const top = new THREE.Mesh(new THREE.BoxGeometry(pw, THICKNESS, THICKNESS), stoneMat);
+            top.position.set(0, ph / 2, 0);
+            top.rotation.x = Math.PI / 2;
+            group.add(top);
+
+            const bot = new THREE.Mesh(new THREE.BoxGeometry(pw, THICKNESS, THICKNESS), stoneMat);
+            bot.position.set(0, -ph / 2, 0);
+            bot.rotation.x = -Math.PI / 2;
+            group.add(bot);
+
+            const left = new THREE.Mesh(new THREE.BoxGeometry(THICKNESS, ph + THICKNESS, THICKNESS), stoneMat);
+            left.position.set(-pw / 2, 0, 0);
+            group.add(left);
+
+            const right = new THREE.Mesh(new THREE.BoxGeometry(THICKNESS, ph + THICKNESS, THICKNESS), stoneMat);
+            right.position.set(pw / 2, 0, 0);
+            group.add(right);
+
+            // Place on table scattered
+            group.position.copy(START_POSITIONS[index]);
+            group.rotation.z = (Math.random() - 0.5) * 0.4;
+
+            _scene.add(group);
+            pieces.push(group);
+
+            // Snap indicator dot
+            const dot = new THREE.Mesh(
+                new THREE.SphereGeometry(0.04, 8, 8),
+                new THREE.MeshStandardMaterial({
+                    color: 0xFFD700,
+                    emissive: new THREE.Color(0xFFAA00),
+                    emissiveIntensity: 0.8,
+                })
+            );
+            const snapPos = getSnapPosition(index);
+            dot.position.copy(snapPos);
+            dot.name = `snapDot_${index}`;
+            _scene.add(dot);
+
+            console.log(`✅ Piece ${index + 1} built`);
+        });
+    }, undefined, (err) => {
+        console.error('Failed to load tablet texture:', err);
+    });
+}
+
+// -------------------------------------------------------------------
+// TABLET OUTLINE on wall
+// -------------------------------------------------------------------
+function buildTabletOutline() {
+    const outlineMat = new THREE.MeshStandardMaterial({
+        color: 0xFFD700,
+        emissive: new THREE.Color(0xFFAA00),
+        emissiveIntensity: 0.3,
+        transparent: true,
+        opacity: 0.15,
+        side: THREE.DoubleSide,
+    });
+    const outline = new THREE.Mesh(
+        new THREE.PlaneGeometry(TABLET_W + 0.1, TABLET_H + 0.1),
+        outlineMat
+    );
+    outline.position.copy(TABLET_CENTER);
+    _scene.add(outline);
+
+    const glow = new THREE.PointLight(0xFFAA00, 0.8, 3);
+    glow.position.copy(TABLET_CENTER);
+    glow.position.z += 0.3;
+    _scene.add(glow);
+}
+
+// -------------------------------------------------------------------
+// TABLE
 // -------------------------------------------------------------------
 function buildTable() {
     const top = new THREE.MeshStandardMaterial({ color: 0x7A5C3A, roughness: 0.8 });
     const leg = new THREE.MeshStandardMaterial({ color: 0x5C3D1E, roughness: 1.0 });
-
-   addBox(-6,   0.92, -12,   1.0, 0.08, 1.0, top);  // table top
-addBox(-6.45, 0.46, -11.55, 0.08, 0.9, 0.08, leg); // leg 1
-addBox(-5.55, 0.46, -11.55, 0.08, 0.9, 0.08, leg); // leg 2
-addBox(-6.45, 0.46, -12.45, 0.08, 0.9, 0.08, leg); // leg 3
-addBox(-5.55, 0.46, -12.45, 0.08, 0.9, 0.08, leg); // leg 4
+    addBox(-6, 0.92, -12, 1.2, 0.08, 1.2, top);
+    addBox(-6.5, 0.46, -11.5, 0.08, 0.9, 0.08, leg);
+    addBox(-5.5, 0.46, -11.5, 0.08, 0.9, 0.08, leg);
+    addBox(-6.5, 0.46, -12.5, 0.08, 0.9, 0.08, leg);
+    addBox(-5.5, 0.46, -12.5, 0.08, 0.9, 0.08, leg);
 }
 
-function buildTabletFrame() {
-    const frameMat = new THREE.MeshStandardMaterial({
-        color: 0xFFD700,
-        emissive: new THREE.Color(0xFFAA00),
-        emissiveIntensity: 0.6,
-        transparent: true,
-        opacity: 0.35,
-    });
-    const frame = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.85, 0.02), frameMat);
-    frame.position.set(-8.78, 2.45, -11.5);
-frame.rotation.y = Math.PI / 2;
-    _scene.add(frame);
-
-    const glow = new THREE.PointLight(0xFFAA00, 1.0, 3);
-    glow.position.set(0, 1.4, -4.7);
-    _scene.add(glow);
-
-    SNAP_POSITIONS.forEach((pos) => {
-        const slotMat = new THREE.MeshStandardMaterial({
-            color: 0xFFD700,
-            emissive: new THREE.Color(0xFFCC00),
-            emissiveIntensity: 0.3,
-            transparent: true,
-            opacity: 0.2,
-            wireframe: true
-        });
-        const slot = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.28, 0.01), slotMat);
-        slot.position.copy(pos);
-slot.rotation.y = Math.PI / 2;
-        _scene.add(slot);
-    });
-}
-
-function loadAllPieces() {
-    PIECE_FILES.forEach((file, index) => {
-        loader.load(file, (gltf) => {
-            const piece = gltf.scene;
-            piece.scale.set(0.09, 0.09, 0.09);
-            piece.position.copy(START_POSITIONS[index]);
-            piece.rotation.x = -Math.PI / 2;
-            piece.rotation.y = -Math.PI / 2;
-            piece.rotation.z = -Math.PI / 1.85;
-            piece.userData.isPiece   = true;
-piece.userData.index     = index;
-piece.userData.snapped   = false;
-piece.userData.homePos   = START_POSITIONS[index].clone();
-            _scene.add(piece);
-            pieces.push(piece);
-            console.log(`✅ Tablet piece ${index + 1} loaded`);
-        }, undefined, (err) => {
-            console.error(`❌ Failed to load piece ${index + 1}:`, err);
-        });
-    });
-}
-
-function getParentPiece(obj) {
-    while (obj) {
-        if (obj.userData.isPiece) return obj;
-        obj = obj.parent;
-    }
-    return null;
-}
-
-function trySnap(piece, worldPos) {
-    if (!worldPos) {
-        worldPos = new THREE.Vector3();
-        piece.getWorldPosition(worldPos);
-    }
-    const target = SNAP_POSITIONS[piece.userData.index];
-    const dist   = worldPos.distanceTo(target);
-
-    if (dist < SNAP_DISTANCE) {
-        piece.position.copy(target);
-        piece.userData.snapped = true;
-
-        piece.traverse(c => {
-            if (c.isMesh) {
-                c.material = c.material.clone();
-                c.material.emissive = new THREE.Color(0xFFAA00);
-                c.material.emissiveIntensity = 1.0;
-            }
-        });
-        setTimeout(() => {
-            piece.traverse(c => {
-                if (c.isMesh) c.material.emissiveIntensity = 0.15;
-            });
-        }, 800);
-
-        piecesPlaced++;
-        const el = document.getElementById('p1-progress');
-        if (el) el.textContent = `${piecesPlaced} / 6 pieces placed`;
-
-        if (piecesPlaced >= 6) onPuzzleSolved();
-    }
-}
-
+// -------------------------------------------------------------------
+// PUZZLE SOLVED
+// -------------------------------------------------------------------
 function onPuzzleSolved() {
     const el = document.getElementById('p1-ui');
     if (el) el.innerHTML = `
@@ -262,26 +316,35 @@ function onPuzzleSolved() {
         <span style="font-size:14px; color:#FFA500;">The next chamber awakens...</span>
     `;
     const burst = new THREE.PointLight(0xFFD700, 8, 10);
-    burst.position.set(-1.6, 1.4, -2.9);
+    burst.position.copy(TABLET_CENTER);
     _scene.add(burst);
     setTimeout(() => _scene.remove(burst), 2000);
     console.log('Puzzle 1 solved!');
 }
 
+// -------------------------------------------------------------------
+// UI
+// -------------------------------------------------------------------
 function createProgressUI() {
-    const div = document.createElement('div');
-    div.id = 'p1-ui';
-    div.style.cssText = `
-        position: fixed; top: 20px; left: 50%;
-        transform: translateX(-50%);
-        color: #FFD700; font-family: serif; font-size: 16px;
-        text-align: center; pointer-events: none;
-        text-shadow: 0 0 10px #FF6600;
-    `;
-    div.innerHTML = `Restore the sacred tablet...<br><span id="p1-progress">0 / 6 pieces placed</span>`;
-    document.body.appendChild(div);
+    let div = document.getElementById('p1-ui');
+    if (!div) {
+        div = document.createElement('div');
+        div.id = 'p1-ui';
+        div.style.cssText = `
+            position: fixed; top: 20px; left: 50%;
+            transform: translateX(-50%);
+            color: #FFD700; font-family: serif; font-size: 16px;
+            text-align: center; pointer-events: none;
+            text-shadow: 0 0 10px #FF6600;
+        `;
+        document.body.appendChild(div);
+    }
+    div.innerHTML = `Restore the sacred tablet...<br><span id="p1-progress">0 / ${TOTAL_PIECES} pieces placed</span>`;
 }
 
+// -------------------------------------------------------------------
+// HELPER
+// -------------------------------------------------------------------
 function addBox(x, y, z, w, h, d, mat) {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
     mesh.position.set(x, y, z);
