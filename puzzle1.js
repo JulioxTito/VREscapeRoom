@@ -77,7 +77,7 @@ export function puzzle1TryGrab(controller, raycaster) {
                     c.material.emissiveIntensity = 0.6;
                 }
             });
-            controller.attach(piece);
+            // Don't attach to controller — just mark as selected
             controller.userData.heldPiece = piece;
             return true;
         }
@@ -93,46 +93,34 @@ export function puzzle1TryRelease(controller) {
     const piece = controller.userData.heldPiece;
     if (!piece) return false;
 
-    const worldPos = new THREE.Vector3();
-    piece.getWorldPosition(worldPos);
-
-    _scene.attach(piece);
     controller.userData.heldPiece = undefined;
 
     piece.traverse(c => {
         if (c.isMesh) c.material.emissiveIntensity = 0;
     });
 
+    // Always snap to target position
     const target = SNAP_POSITIONS[piece.userData.index];
-    const dist = worldPos.distanceTo(target);
+    piece.position.copy(target);
+    piece.userData.snapped = true;
 
-    if (dist < SNAP_DISTANCE) {
-        // Close enough — snap into place
-        piece.position.copy(target);
-        piece.userData.snapped = true;
+    piece.traverse(c => {
+        if (c.isMesh) {
+            c.material = c.material.clone();
+            c.material.emissive = new THREE.Color(0xFFAA00);
+            c.material.emissiveIntensity = 1.0;
+        }
+    });
+    setTimeout(() => {
         piece.traverse(c => {
-            if (c.isMesh) {
-                c.material = c.material.clone();
-                c.material.emissive = new THREE.Color(0xFFAA00);
-                c.material.emissiveIntensity = 1.0;
-            }
+            if (c.isMesh) c.material.emissiveIntensity = 0.15;
         });
-        setTimeout(() => {
-            piece.traverse(c => {
-                if (c.isMesh) c.material.emissiveIntensity = 0.15;
-            });
-        }, 800);
-        piecesPlaced++;
-        const el = document.getElementById('p1-progress');
-        if (el) el.textContent = `${piecesPlaced} / 6 pieces placed`;
-        if (piecesPlaced >= 6) onPuzzleSolved();
-    } else {
-        // Too far — return to home position
-        piece.position.copy(piece.userData.homePos);
-        piece.rotation.x = -Math.PI / 2;
-        piece.rotation.y = -Math.PI / 2;
-        piece.rotation.z = -Math.PI / 1.85;
-    }
+    }, 800);
+
+    piecesPlaced++;
+    const el = document.getElementById('p1-progress');
+    if (el) el.textContent = `${piecesPlaced} / 6 pieces placed`;
+    if (piecesPlaced >= 6) onPuzzleSolved();
 
     return true;
 }
