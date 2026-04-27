@@ -25,11 +25,11 @@
     <script type="module">
 
         import * as THREE from 'three';
-      import { VRButton } from 'three/addons/webxr/VRButton.js';
-import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
-       import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { initPuzzle1, puzzle1TryGrab, puzzle1TryRelease, puzzle1UpdateHover } from './puzzle1.js';
-        
+        import { VRButton } from 'three/addons/webxr/VRButton.js';
+        import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { initPuzzle1, puzzle1TryGrab, puzzle1TryRelease, puzzle1UpdateHover } from './puzzle1.js';
+        import { initTreasureChest } from './puzzle3.js';
 
         // -------------------------------------------------------------------
         // GLOBALS
@@ -38,7 +38,6 @@ import { initPuzzle1, puzzle1TryGrab, puzzle1TryRelease, puzzle1UpdateHover } fr
         let controller1, controller2;
         let controllerGrip1, controllerGrip2;
         let cameraRig;
-
         const moveSpeed = 2.0;
         const snapAngle = Math.PI / 4;
         let canSnapLeft = true;
@@ -47,6 +46,69 @@ import { initPuzzle1, puzzle1TryGrab, puzzle1TryRelease, puzzle1UpdateHover } fr
         const keys = {};
         window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
         window.addEventListener('keyup',   e => keys[e.key.toLowerCase()] = false);
+
+        // ── KEYBOARD TEST SHORTCUTS — for debugging without VR controllers ──
+        // Press these keys anywhere to skip steps in the puzzle
+        window.addEventListener('keydown', e => {
+            const k = e.key.toLowerCase();
+            if (k === '1') {
+                // Force-unlock the chest immediately
+                const chest = grabbableObjects.find(g => g.userData?.dials);
+                console.log('TEST: force unlock chest');
+                // Walk grabbableObjects looking for any chest dial → its parent is chest
+                for (const o of grabbableObjects) {
+                    if (o.userData?.type === 'dial' && o.parent?.userData?.dials) {
+                        const ch = o.parent;
+                        ch.userData.dials.forEach((d, i) => {
+                            d.userData.value = [4, 2, 3][i];
+                            ch.userData.updateDial(d);
+                        });
+                        updateChestStatus(ch);
+                        break;
+                    }
+                }
+            }
+            if (k === '2') {
+                // Force-grab the chest key (attaches to camera)
+                console.log('TEST: force grab key');
+                scene.traverse(obj => {
+                    if (obj.userData?.type === 'chestKey') {
+                        camera.attach(obj);
+                        obj.position.set(0.3, -0.3, -0.6);
+                        obj.scale.setScalar(1);
+                        obj.userData.grabbed = true;
+                        obj.visible = true;
+                        scene.userData.keyObtained = true;
+                    }
+                });
+            }
+            if (k === '3') {
+                // Force-insert key into keyhole stand
+                console.log('TEST: force insert key');
+                if (!scene.userData.keyInserted && scene.userData.keyObtained) {
+                    insertKeyIntoStand();
+                } else if (!scene.userData.keyObtained) {
+                    console.log('Need to grab the key first (press 2)');
+                }
+            }
+            if (k === '4') {
+                // Force-pull the lever (only works after lever has risen)
+                console.log('TEST: force pull lever');
+                scene.userData.leverPulled = true;
+                scene.userData.leverT = 0;
+            }
+            if (k === '5') {
+                // Teleport outside the door to test the escaped sign
+                console.log('TEST: teleport outside');
+                scene.userData.leverPulled = true;
+                scene.userData.doorOpen = true;
+                scene.userData.doorT = 1;
+                if (scene.userData.doorSlab) {
+                    scene.userData.doorSlab.position.y = scene.userData.doorSlab.userData.closedY + 4;
+                }
+                cameraRig.position.set(0, 0, 10);
+            }
+        });
 
         let gamePhase = 'tomb';
         let grabbableObjects = [];
@@ -94,6 +156,14 @@ import { initPuzzle1, puzzle1TryGrab, puzzle1TryRelease, puzzle1UpdateHover } fr
         // All torch point lights — animated each frame for flicker
         const torchLights = [];
         const loader = new GLTFLoader();
+
+        // Hourglass & Timer State
+        let hourglassGroup; // This will be attached to the camera
+        let hourglassSandTop, hourglassSandBottom;
+        let timeRemaining = 600; // 10 minutes
+        let timerPaused = true;  // start paused — user clicks play to begin
+        let lastTimestamp = 0;
+        let timerTextPanel = null;
 
         loader.load('Assets/Models/torch/scene.gltf', (gltf) => {
             torchTemplate = gltf.scene;
@@ -146,7 +216,6 @@ import { initPuzzle1, puzzle1TryGrab, puzzle1TryRelease, puzzle1UpdateHover } fr
             // Hemisphere: warm firelight from below bouncing off stone floor, cool dark above
             const hemi = new THREE.HemisphereLight(0x7A3208, 0x080200, 1.4);
             scene.add(hemi);
-
             buildCorridor();
             buildTombRoom();
             buildStation1();
@@ -156,7 +225,7 @@ import { initPuzzle1, puzzle1TryGrab, puzzle1TryRelease, puzzle1UpdateHover } fr
             buildLever();
             buildWallPaintings();
             buildEgyptExit();
-initPuzzle1(scene, camera, renderer);
+            initPuzzle1(scene, camera, renderer);
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
@@ -201,6 +270,9 @@ initPuzzle1(scene, camera, renderer);
             controller1.add(line.clone());
             controller2.add(line.clone());
 
+            // ── Build hourglass HUD (attaches to camera so it follows player view) ──
+            buildHourglass();
+
             // Desktop mouse click — triggers lever when clicked
             renderer.domElement.addEventListener('click', (e) => {
                 if (renderer.xr.isPresenting) return; // only in non-VR mode
@@ -214,16 +286,114 @@ initPuzzle1(scene, camera, renderer);
                 for (const h of hits) {
                     let o = h.object;
                     while (o && !o.userData.type) o = o.parent;
-                    if (o && o.userData.type === 'lever') {
+                    if (!o) continue;
+                    if (o.userData.type === 'lever') {
                         scene.userData.leverPulled = true;
                         scene.userData.leverT = 0;
                         console.log('Lever pulled via mouse click!');
+                        return;
+                    }
+                    if (o.userData.type === 'dial') {
+                        const chest = o.parent;
+                        if (chest && chest.userData.updateDial && !chest.userData.isUnlocked()) {
+                            o.userData.value = (o.userData.value + 1) % 10;
+                            chest.userData.updateDial(o);
+                            updateChestStatus(chest);
+                        }
+                        return;
+                    }
+                    if (o.userData.type === 'chestKey' && o.userData.grabbable && !o.userData.grabbed) {
+                        // Desktop: grab key by attaching to camera (carry it as you walk)
+                        camera.attach(o);
+                        o.position.set(0.3, -0.3, -0.6);
+                        o.userData.grabbed = true;
+                        scene.userData.keyObtained = true;
+                        console.log('🗝 Chest key obtained (desktop)!');
+                        return;
+                    }
+                    // ── KEYHOLE STAND insertion — only works if player has the key ──
+                    if (o.userData.type === 'keyholeStand' && scene.userData.keyObtained && !scene.userData.keyInserted) {
+                        insertKeyIntoStand();
                         return;
                     }
                 }
             });
 
             window.addEventListener('resize', onWindowResize);
+        }
+
+        // Triggered when player clicks the keyhole stand while holding the key
+        function insertKeyIntoStand() {
+            scene.userData.keyInserted = true;
+            console.log('🗝 Key inserted into stand! Lever rising...');
+
+            // 1. Hide the key from the player (it's "consumed" into the stand)
+            //    Find any object in the scene with userData.type === 'chestKey' and hide it
+            scene.traverse(obj => {
+                if (obj.userData && obj.userData.type === 'chestKey') {
+                    obj.visible = false;
+                }
+            });
+
+            // 2. Change keyhole indicator from red to green
+            if (scene.userData.keyholeIndicator) {
+                scene.userData.keyholeIndicator.color.setHex(0x30FF30);
+                scene.userData.keyholeIndicator.intensity = 4.0;
+            }
+
+            // 3. Trigger lever rising animation
+            scene.userData.leverRising = true;
+            scene.userData.leverRiseT = 0;
+        }
+
+        // Big "YOU ESCAPED!" banner that takes over the screen briefly when player walks out
+        function showEscapedSign() {
+            const sign = document.createElement('div');
+            sign.id = 'escapedSign';
+            sign.style.cssText = `
+                position: fixed;
+                top: 0; left: 0; right: 0; bottom: 0;
+                z-index: 2000;
+                display: flex; align-items: center; justify-content: center;
+                background: radial-gradient(ellipse at center, rgba(255,215,0,0.25) 0%, rgba(0,0,0,0) 70%);
+                pointer-events: none;
+                animation: escapedFadeIn 1s ease-out forwards;
+            `;
+            sign.innerHTML = `
+                <style>
+                    @keyframes escapedFadeIn {
+                        0% { opacity: 0; transform: scale(0.7); }
+                        100% { opacity: 1; transform: scale(1); }
+                    }
+                    @keyframes escapedGlow {
+                        0%, 100% { text-shadow: 0 0 20px #FFD700, 0 0 40px #B8860B, 0 0 60px #000; }
+                        50% { text-shadow: 0 0 30px #FFD700, 0 0 60px #B8860B, 0 0 90px #000; }
+                    }
+                </style>
+                <div style="text-align: center;">
+                    <div style="
+                        font-family: 'Times New Roman', serif;
+                        font-size: 120px;
+                        font-weight: bold;
+                        color: #8B4513;
+                        -webkit-text-stroke: 3px #2A1500;
+                        letter-spacing: 12px;
+                        animation: escapedGlow 2s ease-in-out infinite;
+                        margin-bottom: 16px;
+                    ">YOU ESCAPED!</div>
+                    <div style="
+                        font-family: serif;
+                        font-size: 32px;
+                        color: #FFE680;
+                        text-shadow: 2px 2px 6px #000, 0 0 12px #4A2A00;
+                        letter-spacing: 4px;
+                    ">★ The Pharaoh's Tomb is conquered ★</div>
+                </div>
+            `;
+            document.body.appendChild(sign);
+            // Stop the timer
+            timeRemaining = 0;
+            console.log('🏆 YOU ESCAPED!');
         }
 
         function buildCorridor() {
@@ -314,6 +484,11 @@ initPuzzle1(scene, camera, renderer);
             addBox( 0, -0.1, -17, 18, 0.2, 20, floorMat);
             // Ceiling
             addBox( 0,  5.2, -17, 18, 0.3, 20, ceilMat);
+
+            // ── PUZZLE 3 SYMBOLS ON CEILING ──
+            // Place 4 suns, 2 scarabs, and 3 ankhs across the ceiling for the player to count
+            // (these counts must match SECRET_CODE = [4, 2, 3] in puzzle3.js)
+            buildCeilingSymbols();
 
             // Back wall — emissive orange centre glow
             const backWall = new THREE.Mesh(new THREE.BoxGeometry(18, 5.6, 0.3), backWallMat);
@@ -673,15 +848,308 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
             s3Light.name = 'station3Light';
             s3Light.position.set(6, 3.5, -12);
             scene.add(s3Light);
+
+            // ── KEYHOLE STAND — sits next to the lever pod, accepts the chest key ──
+            buildKeyholeStand();
+        }
+
+        function buildKeyholeStand() {
+            // The lever pod is at (6, 0.5, -12). Place the keyhole stand 2 units to the LEFT (toward room centre at x=4)
+            // facing the player who walks up the centre aisle.
+            const standGroup = new THREE.Group();
+            standGroup.position.set(4.2, 0, -12);
+            standGroup.rotation.y = -Math.PI / 2; // face toward room centre (-x)
+            scene.add(standGroup);
+
+            // Sandstone column body
+            const sandstoneMat = new THREE.MeshStandardMaterial({ color: 0xC8A060, roughness: 0.9 });
+            const darkStoneMat = new THREE.MeshStandardMaterial({ color: 0x8B6020, roughness: 0.95 });
+            const goldMat = new THREE.MeshStandardMaterial({
+                color: 0xDAA520, metalness: 0.85, roughness: 0.2,
+                emissive: 0x4A2A00, emissiveIntensity: 0.5
+            });
+
+            // Base slab
+            const base = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.15, 0.7), darkStoneMat);
+            base.position.y = 0.075;
+            base.castShadow = true; base.receiveShadow = true;
+            standGroup.add(base);
+
+            // Column body
+            const column = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.0, 0.5), sandstoneMat);
+            column.position.y = 0.15 + 0.5;
+            column.castShadow = true; column.receiveShadow = true;
+            standGroup.add(column);
+
+            // Top cap (slightly wider)
+            const cap = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.08, 0.65), darkStoneMat);
+            cap.position.y = 0.15 + 1.0 + 0.04;
+            standGroup.add(cap);
+
+            // Gold trim band
+            const goldTrim = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.04, 0.55), goldMat);
+            goldTrim.position.y = 0.15 + 1.04;
+            standGroup.add(goldTrim);
+
+            // ── KEYHOLE PLATE on front face of column ──
+            const keyholePlate = new THREE.Mesh(
+                new THREE.BoxGeometry(0.3, 0.4, 0.04),
+                goldMat
+            );
+            keyholePlate.position.set(0, 0.65, 0.27);
+            standGroup.add(keyholePlate);
+
+            // The actual keyhole (dark hole)
+            const keyholeRing = new THREE.Mesh(
+                new THREE.RingGeometry(0.025, 0.06, 16),
+                new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.DoubleSide })
+            );
+            keyholeRing.position.set(0, 0.7, 0.30);
+            standGroup.add(keyholeRing);
+
+            // Vertical slit below the ring (key shaft slot)
+            const keyholeSlit = new THREE.Mesh(
+                new THREE.PlaneGeometry(0.025, 0.12),
+                new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.DoubleSide })
+            );
+            keyholeSlit.position.set(0, 0.62, 0.30);
+            standGroup.add(keyholeSlit);
+
+            // Make the keyhole plate clickable / detect-able as the key insertion target
+            keyholePlate.userData.type = 'keyholeStand';
+            keyholeRing.userData.type = 'keyholeStand';
+            keyholeSlit.userData.type = 'keyholeStand';
+            grabbableObjects.push(keyholePlate);
+            grabbableObjects.push(keyholeRing);
+
+            // Pulsing red light when key not yet inserted, green when inserted
+            const indicatorLight = new THREE.PointLight(0xFF3030, 2.0, 3);
+            indicatorLight.position.set(0, 0.7, 0.5);
+            standGroup.add(indicatorLight);
+
+            // Store references
+            scene.userData.keyholeStand = standGroup;
+            scene.userData.keyholeIndicator = indicatorLight;
+            scene.userData.keyInserted = false;
+
+            // Label so the player knows what it is
+            makeTextPanel('Insert Key Here', 4.2, 1.65, -12, 0.7, 0.18);
+        }
+
+        // ── PUZZLE 3 CEILING SYMBOLS — place 4 suns, 2 scarabs, 7 ankhs on ceiling ──
+        function buildCeilingSymbols() {
+            // Drawing helpers — same procedural symbols as on the chest dial labels
+            function drawSun(ctx, cx, cy, size, color) {
+                ctx.fillStyle = color;
+                ctx.beginPath(); ctx.arc(cx, cy, size * 0.35, 0, Math.PI * 2); ctx.fill();
+                ctx.strokeStyle = color; ctx.lineWidth = size * 0.07;
+                for (let i = 0; i < 14; i++) {
+                    const a = -Math.PI / 2 + (i - 7) * 0.18;
+                    ctx.beginPath();
+                    ctx.moveTo(cx + Math.cos(a) * size * 0.4, cy + Math.sin(a) * size * 0.4);
+                    ctx.lineTo(cx + Math.cos(a) * size * 0.95, cy + Math.sin(a) * size * 0.95);
+                    ctx.stroke();
+                }
+            }
+            function drawScarab(ctx, cx, cy, size, color) {
+                ctx.fillStyle = color;
+                ctx.beginPath();
+                ctx.ellipse(cx, cy, size * 0.45, size * 0.6, 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#3a1a02'; ctx.lineWidth = size * 0.05;
+                ctx.beginPath(); ctx.moveTo(cx, cy - size * 0.5); ctx.lineTo(cx, cy + size * 0.5); ctx.stroke();
+                for (let i = 1; i < 4; i++) {
+                    ctx.beginPath();
+                    ctx.moveTo(cx - size * 0.4, cy - size * 0.4 + i * size * 0.25);
+                    ctx.lineTo(cx + size * 0.4, cy - size * 0.4 + i * size * 0.25);
+                    ctx.stroke();
+                }
+                ctx.lineWidth = size * 0.06;
+                for (let i = -1; i <= 1; i += 2) {
+                    ctx.beginPath(); ctx.moveTo(cx + i * size * 0.45, cy - size * 0.3);
+                    ctx.lineTo(cx + i * size * 0.7, cy - size * 0.45); ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(cx + i * size * 0.45, cy);
+                    ctx.lineTo(cx + i * size * 0.75, cy); ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(cx + i * size * 0.45, cy + size * 0.3);
+                    ctx.lineTo(cx + i * size * 0.7, cy + size * 0.45); ctx.stroke();
+                }
+            }
+            function drawAnkh(ctx, cx, cy, size, color) {
+                ctx.fillStyle = color;
+                ctx.beginPath();
+                ctx.ellipse(cx, cy - size * 0.45, size * 0.28, size * 0.35, 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#1a0a02';
+                ctx.beginPath();
+                ctx.ellipse(cx, cy - size * 0.45, size * 0.16, size * 0.22, 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = color;
+                ctx.fillRect(cx - size * 0.45, cy - size * 0.10, size * 0.9, size * 0.16);
+                ctx.fillRect(cx - size * 0.10, cy - size * 0.10, size * 0.20, size * 0.85);
+            }
+
+            // Make a symbol texture — transparent background so only the symbol shows
+            // (No box around it — the ceiling shows behind it)
+            function makeSymbolTexture(symbolType) {
+                const c = document.createElement('canvas');
+                c.width = 256; c.height = 256;
+                const ctx = c.getContext('2d');
+                // No background fill — keep canvas fully transparent
+                if (symbolType === 'sun') drawSun(ctx, 128, 128, 110, '#FFD700');
+                else if (symbolType === 'scarab') drawScarab(ctx, 128, 128, 105, '#FFD700');
+                else if (symbolType === 'ankh') drawAnkh(ctx, 128, 128, 110, '#FFD700');
+                return new THREE.CanvasTexture(c);
+            }
+
+            // Cache textures
+            const sunTex = makeSymbolTexture('sun');
+            const scarabTex = makeSymbolTexture('scarab');
+            const ankhTex = makeSymbolTexture('ankh');
+
+            // Place a symbol as a flat plane facing DOWN
+            // Lower to y=4.6 so it's well away from the y=5.2 ceiling (no z-fight)
+            // 1.4m wide so symbols are clearly visible from the floor
+            function placeCeilingSymbol(tex, x, z) {
+                const plane = new THREE.Mesh(
+                    new THREE.PlaneGeometry(1.4, 1.4),
+                    new THREE.MeshBasicMaterial({
+                        map: tex,
+                        transparent: true,
+                        side: THREE.DoubleSide,
+                        depthWrite: false,        // prevents the transparent plane from blocking objects behind it
+                        alphaTest: 0.05           // crisp edges around the symbol
+                    })
+                );
+                plane.position.set(x, 4.6, z);
+                plane.rotation.x = Math.PI / 2; // face down toward player
+                scene.add(plane);
+            }
+
+            // Place symbols away from the corridor entrance at z=-9.
+            // All symbols must have z <= -13 so they're clearly away from the doors.
+
+            // ─── 4 SUNS ───
+            placeCeilingSymbol(sunTex, -6, -14);
+            placeCeilingSymbol(sunTex,  6, -17);
+            placeCeilingSymbol(sunTex, -6, -22);
+            placeCeilingSymbol(sunTex,  6, -25);
+
+            // ─── 2 SCARABS ───
+            placeCeilingSymbol(scarabTex, 0, -16);
+            placeCeilingSymbol(scarabTex, 0, -24);
+
+            // ─── 3 ANKHS ───
+            placeCeilingSymbol(ankhTex, -7, -19);
+            placeCeilingSymbol(ankhTex,  7, -21);
+            placeCeilingSymbol(ankhTex, -3, -26);
         }
 
         function buildStation4() {
-             const podMat = new THREE.MeshStandardMaterial({ color: 0x7A6A50, roughness: 0.7 });
-             const pod = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.0, 0.5), podMat);
-             pod.position.set(6, 0.5, -22);
-             pod.receiveShadow = true;
-             scene.add(pod);
-             makeTextPanel('STATION 4\nFinal Clue', 6, 1.85, -22, 0.85, 0.35);
+            const stationGroup = new THREE.Group();
+            stationGroup.position.set(6, 0, -22);
+            scene.add(stationGroup);
+
+            // 1. Build the table
+            const tableMat = new THREE.MeshStandardMaterial({ color: 0x4a301d, roughness: 0.85 });
+            const tableTop = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.15, 1.8), tableMat);
+            tableTop.position.y = 0.95;
+            tableTop.castShadow = true;
+            tableTop.receiveShadow = true;
+            stationGroup.add(tableTop);
+            const legGeom = new THREE.BoxGeometry(0.12, 0.95, 0.12);
+            [[-1.05,-0.75],[1.05,-0.75],[-1.05,0.75],[1.05,0.75]].forEach(([x,z]) => {
+                const leg = new THREE.Mesh(legGeom, tableMat);
+                leg.position.set(x, 0.475, z);
+                stationGroup.add(leg);
+            });
+
+            // 2. Initialize the chest from puzzle3.js (auto-adds to scene at origin)
+            const chest = initTreasureChest(scene, camera, renderer);
+
+            // 3. Re-parent chest into stationGroup
+            // Place chest TOWARD THE BACK of the table so plaque sits in front
+            stationGroup.add(chest);
+            chest.position.set(0, 0.95 + 0.075, -0.25);
+            chest.scale.set(0.7, 0.7, 0.7);
+
+            // 4. Register chest dials and key with grabbableObjects so VR controllers can interact
+            if (chest.userData.dials) {
+                chest.userData.dials.forEach(dial => grabbableObjects.push(dial));
+            }
+            if (chest.userData.keyGroup) {
+                grabbableObjects.push(chest.userData.keyGroup);
+            }
+
+            // 5. ── 3D STATUS PLAQUE on the table front (Egyptian-themed) ──
+            // Texture updates as the user clicks dials, showing live counts
+            function makeStatusTexture(sunCount, scarabCount, ankhCount, unlocked) {
+                const c = document.createElement('canvas');
+                c.width = 1024; c.height = 256;
+                const x = c.getContext('2d');
+                // Dark wood/papyrus background
+                x.fillStyle = '#1a0a02';
+                x.fillRect(0, 0, 1024, 256);
+                // Inner dark frame
+                x.fillStyle = '#3a2010';
+                x.fillRect(8, 8, 1008, 240);
+                // Gold border
+                x.strokeStyle = '#DAA520';
+                x.lineWidth = 6;
+                x.strokeRect(14, 14, 996, 228);
+                // Inner thin border
+                x.strokeStyle = '#8B6914';
+                x.lineWidth = 2;
+                x.strokeRect(24, 24, 976, 208);
+
+                if (unlocked) {
+                    x.fillStyle = '#80FF80';
+                    x.font = 'bold 84px serif';
+                    x.textAlign = 'center';
+                    x.textBaseline = 'middle';
+                    x.shadowColor = '#80FF80';
+                    x.shadowBlur = 20;
+                    x.fillText('★ UNLOCKED — GRAB THE KEY ★', 512, 128);
+                } else {
+                    x.fillStyle = '#FFD700';
+                    x.font = 'bold 64px serif';
+                    x.textAlign = 'center';
+                    x.textBaseline = 'middle';
+                    x.shadowColor = '#FFE680';
+                    x.shadowBlur = 10;
+                    // Three counts evenly spaced
+                    x.fillText(`Sun: ${sunCount}`, 200, 128);
+                    x.fillText(`Scarab: ${scarabCount}`, 512, 128);
+                    x.fillText(`Ankh: ${ankhCount}`, 824, 128);
+                }
+                x.shadowBlur = 0;
+                return new THREE.CanvasTexture(c);
+            }
+
+            const statusTex = makeStatusTexture(0, 0, 0, false);
+            const statusPlaque = new THREE.Mesh(
+                new THREE.PlaneGeometry(1.6, 0.4),
+                new THREE.MeshBasicMaterial({ map: statusTex, transparent: true })
+            );
+            // Lay flat on the table top, in FRONT of the chest (chest is at z=-0.25, plaque at z=+0.5)
+            statusPlaque.position.set(0, 1.04, 0.55);
+            statusPlaque.rotation.x = -Math.PI / 2; // flat (face-up)
+            stationGroup.add(statusPlaque);
+
+            // Store the update function on the chest so onSelectStart/click handlers can call it
+            chest.userData.updateStatusPlaque = function() {
+                const dials = chest.userData.dials;
+                const newTex = makeStatusTexture(
+                    dials[0].userData.value,
+                    dials[1].userData.value,
+                    dials[2].userData.value,
+                    chest.userData.isUnlocked()
+                );
+                statusPlaque.material.map = newTex;
+                statusPlaque.material.needsUpdate = true;
+            };
+
+            // 6. Station label
+            makeTextPanel('STATION 4\nTreasure Chest', 6, 2.6, -22, 0.9, 0.35);
         }
 
         function spawnGlyphs() {
@@ -1315,9 +1783,17 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
             // Lever sits ON TOP of the front-right pod at (x=6, y=0.5, z=-12), top at y≈1.0
             // The group is oriented so +z axis points toward the centre of the room (-x direction)
             const leverGroup = new THREE.Group();
-            leverGroup.position.set(6, 1.0, -12); // on top of front-right pod (what you call Station 4)
+            // START HIDDEN below the floor — only rises when the chest key is inserted into the keyhole stand
+            leverGroup.position.set(6, -3.0, -12); // 4 units below normal position (normal y=1.0, so -3.0)
             leverGroup.rotation.y = -Math.PI / 2; // face toward centre of room
             scene.add(leverGroup);
+
+            // Store reference so we can raise it later
+            scene.userData.leverGroup = leverGroup;
+            scene.userData.leverHiddenY = -3.0;
+            scene.userData.leverFinalY = 1.0;
+            scene.userData.leverRiseT = 0; // animation progress 0..1
+            scene.userData.leverRising = false;
 
             // Stone backplate (flat against wall)
             const plateMat = new THREE.MeshStandardMaterial({color: 0x5A3410, roughness: 0.9, emissive: 0x2A1400, emissiveIntensity: 0.6});
@@ -1365,23 +1841,70 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
         function onSelectStart(event) {
             const controller = event.target;
             raycaster.setFromXRController(controller);
-            if (puzzle1TryGrab(controller, raycaster)) return;
-            const hits = raycaster.intersectObjects(grabbableObjects, true);
-            if (hits.length > 0) {
-                const object = hits[0].object;
-                // Lever: pull it down instead of attaching
-                let leverObj = object;
-                while (leverObj && !leverObj.userData.type) leverObj = leverObj.parent;
-                if (leverObj && leverObj.userData.type === 'lever') {
+
+            // ── PRIORITY: check chest dial / key / keyhole / lever FIRST ──
+            // These checks happen before puzzle1TryGrab so both controllers work consistently
+            const priorityHits = raycaster.intersectObjects(grabbableObjects, true);
+            console.log('VR select - controller:', controller.userData.handedness || '(unknown)', 'hits:', priorityHits.length);
+            for (const hit of priorityHits) {
+                let target = hit.object;
+                while (target && !target.userData.type) target = target.parent;
+                if (!target) continue;
+                const t = target.userData.type;
+                console.log('VR select - target type:', t);
+
+                if (t === 'lever') {
                     scene.userData.leverPulled = true;
                     scene.userData.leverT = 0;
                     console.log('Lever pulled! (VR controller)');
                     return;
                 }
+                if (t === 'dial') {
+                    const chest = target.parent;
+                    if (chest && chest.userData.updateDial && !chest.userData.isUnlocked()) {
+                        target.userData.value = (target.userData.value + 1) % 10;
+                        chest.userData.updateDial(target);
+                        updateChestStatus(chest);
+                        console.log('Dial advanced to:', target.userData.value);
+                    }
+                    return;
+                }
+                if (t === 'chestKey' && target.userData.grabbable && !target.userData.grabbed) {
+                    // Attach key to controller so it follows along
+                    controller.attach(target);
+                    target.position.set(0, -0.05, -0.15); // sit just in front of controller
+                    target.rotation.set(0, 0, 0);
+                    target.userData.grabbed = true;
+                    target.userData.heldByController = controller;
+                    controller.userData.selected = target;
+                    controller.userData.selectedType = 'chestKey';
+                    scene.userData.keyObtained = true;
+                    console.log('🗝 Chest key grabbed by controller');
+                    return;
+                }
+                if (t === 'keyholeStand' && scene.userData.keyObtained && !scene.userData.keyInserted) {
+                    insertKeyIntoStand();
+                    return;
+                }
+            }
+
+            // ── Fallback to puzzle1's grab logic ──
+            if (puzzle1TryGrab(controller, raycaster)) return;
+
+            // ── Default: just attach whatever was hit ──
+            if (priorityHits.length > 0) {
+                const object = priorityHits[0].object;
                 controller.attach(object);
                 controller.userData.selected = object;
-                if(object.userData.type === 'scrollPiece') controller.userData.selectedType = 'scroll';
-                if(object.userData.type === 'weight') controller.userData.selectedType = 'weight';
+                if (object.userData.type === 'scrollPiece') controller.userData.selectedType = 'scroll';
+                if (object.userData.type === 'weight') controller.userData.selectedType = 'weight';
+            }
+        }
+
+        // Update the chest status — refreshes the 3D plaque on the table
+        function updateChestStatus(chest) {
+            if (chest && chest.userData.updateStatusPlaque) {
+                chest.userData.updateStatusPlaque();
             }
         }
 
@@ -1390,6 +1913,14 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
             const obj = controller.userData.selected;
             if (puzzle1TryRelease(controller)) return;
             if (!obj) return;
+
+            // ── KEEP the chest key on the controller — it should not drop when trigger released ──
+            // Player carries it until they click the keyhole stand
+            if (controller.userData.selectedType === 'chestKey') {
+                console.log('Chest key stays attached to controller');
+                return;
+            }
+
             scene.attach(obj);
             const type = controller.userData.selectedType;
             if (type === 'scroll') {
@@ -1422,15 +1953,41 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
             const canvas = document.createElement('canvas');
             canvas.width = 512; canvas.height = 256;
             const ctx = canvas.getContext('2d');
-            ctx.fillStyle = '#1a0800';
-            ctx.fillRect(0, 0, 512, 256);
-            ctx.fillStyle = '#FFD700';
-            ctx.font = 'bold 36px serif';
-            ctx.textAlign = 'center';
-            ctx.fillText(text.split('\n')[0], 256, 100);
-            const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true }));
+            // Draw initial text
+            renderTextOntoCanvas(ctx, canvas, text);
+            const tex = new THREE.CanvasTexture(canvas);
+            const mesh = new THREE.Mesh(
+                new THREE.PlaneGeometry(w, h),
+                new THREE.MeshBasicMaterial({ map: tex, transparent: true })
+            );
             mesh.position.set(x, y, z);
+            // Stash the canvas + ctx + texture so updateTextPanel can rewrite later
+            mesh.userData.canvas = canvas;
+            mesh.userData.ctx = ctx;
+            mesh.userData.tex = tex;
             scene.add(mesh);
+            return mesh;
+        }
+
+        function renderTextOntoCanvas(ctx, canvas, text) {
+            ctx.fillStyle = '#1a0800';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#FFD700';
+            ctx.font = 'bold 60px serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            const lines = text.split('\n');
+            const lineH = 70;
+            const startY = (canvas.height - (lines.length - 1) * lineH) / 2;
+            lines.forEach((line, i) => {
+                ctx.fillText(line, canvas.width / 2, startY + i * lineH);
+            });
+        }
+
+        function updateTextPanel(mesh, newText) {
+            if (!mesh || !mesh.userData.canvas) return;
+            renderTextOntoCanvas(mesh.userData.ctx, mesh.userData.canvas, newText);
+            mesh.userData.tex.needsUpdate = true;
         }
 
         function placeTorch(parent, x, y, z, lightIntensity = 1.5) {
@@ -1460,6 +2017,92 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
         }
 
         function spawnTorch(parent, x, y, z) { placeTorch(parent, x, y, z, 1.5); }
+
+        function buildHourglass() {
+            // ── 2D HTML overlay timer fixed in top-right corner ──
+            // Doesn't move with player, doesn't depend on VR camera, always visible.
+            const hud = document.createElement('div');
+            hud.id = 'timerHUD';
+            hud.style.cssText = `
+                position: fixed;
+                top: 18px;
+                right: 18px;
+                z-index: 1000;
+                background: rgba(20, 8, 2, 0.92);
+                border: 3px solid #DAA520;
+                border-radius: 8px;
+                padding: 10px 16px;
+                font-family: 'Times New Roman', serif;
+                color: #FFD700;
+                text-align: center;
+                box-shadow: 0 0 16px rgba(218,165,32,0.4);
+                pointer-events: none;
+                user-select: none;
+                min-width: 180px;
+            `;
+            hud.innerHTML = `
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <!-- Big SVG hourglass with animated sand -->
+                    <svg id="hgSvg" width="44" height="60" viewBox="0 0 44 60" style="flex-shrink:0;">
+                        <!-- Top + bottom gold caps -->
+                        <rect x="4" y="2" width="36" height="3" fill="#DAA520"/>
+                        <rect x="4" y="55" width="36" height="3" fill="#DAA520"/>
+                        <!-- Glass outline (top funnel + bottom funnel) -->
+                        <polygon points="6,5 38,5 24,29 22,29 20,29 6,5"
+                                 fill="rgba(218,165,32,0.08)" stroke="#DAA520" stroke-width="1.5"/>
+                        <polygon points="6,55 38,55 24,31 22,31 20,31 6,55"
+                                 fill="rgba(218,165,32,0.08)" stroke="#DAA520" stroke-width="1.5"/>
+                        <!-- Sand (top — drains as time decreases) -->
+                        <polygon id="hgSandTop"
+                                 points="7,6 37,6 24,28 22,28 20,28 7,6"
+                                 fill="#FFD700"/>
+                        <!-- Sand (bottom — fills as time decreases) -->
+                        <polygon id="hgSandBot"
+                                 points="22,55 22,55 22,55"
+                                 fill="#FFD700"/>
+                    </svg>
+                    <div style="flex:1;">
+                        <div style="font-size: 13px; letter-spacing: 2px; opacity: 0.85;">TIME REMAINING</div>
+                        <div id="timerValue" style="font-size: 36px; font-weight: bold; line-height: 1;
+                            text-shadow: 0 0 8px rgba(255,215,0,0.6);">10:00</div>
+                    </div>
+                </div>
+                <div id="sandBar" style="height: 6px; background: rgba(0,0,0,0.5); border-radius: 3px;
+                    margin-top: 10px; overflow: hidden;">
+                    <div id="sandFill" style="height: 100%; width: 100%; background: linear-gradient(90deg, #FFD700, #E3C985);"></div>
+                </div>
+            `;
+            document.body.appendChild(hud);
+
+            // ── AUTO-START TIMER on first user interaction with the scene ──
+            // The Quest 3 emulator's "play" button dispatches a click on the canvas, so any of these will trigger:
+            // - Click anywhere on the 3D canvas (includes pressing the emulator play button)
+            // - Press any key (WASD movement, etc.)
+            // - VR controller trigger
+            const startTimerOnce = () => {
+                if (timerPaused) {
+                    timerPaused = false;
+                    console.log('▶ Timer started!');
+                }
+            };
+            renderer.domElement.addEventListener('click', startTimerOnce, { once: false });
+            window.addEventListener('keydown', startTimerOnce, { once: false });
+            // Also start on first VR controller interaction
+            if (controller1) controller1.addEventListener('selectstart', startTimerOnce);
+            if (controller2) controller2.addEventListener('selectstart', startTimerOnce);
+            // And start on real WebXR session begin
+            renderer.xr.addEventListener('sessionstart', startTimerOnce);
+
+            // Stash references so animate() can update them
+            timerTextPanel = {
+                isHTML: true,
+                valueEl: document.getElementById('timerValue'),
+                fillEl: document.getElementById('sandFill'),
+                hgSandTop: document.getElementById('hgSandTop'),
+                hgSandBot: document.getElementById('hgSandBot'),
+                userData: { lastTime: '' }
+            };
+        }
 
         function handleKeyboard() {
             const delta = 1 / 60;
@@ -1514,30 +2157,86 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
-        function animate() {
+        function animate(timestamp) {
+            // 1. --- DELTA TIME CALCULATION ---
+            // Needed for smooth timer countdown
+            const dt = lastTimestamp ? (timestamp - lastTimestamp) / 1000 : 0;
+            lastTimestamp = timestamp;
+
+            // 2. --- LOCOMOTION & INPUT ---
             handleKeyboard();
             handleLocomotion();
 
-            // === TORCH FLICKER ===
-            const t = performance.now() * 0.001; // seconds
+            // 3. --- TORCH FLICKER ---
+            const t = performance.now() * 0.001; 
             torchLights.forEach(({ light, fill, baseIntensity, phase }) => {
-                // Layered sin waves at different frequencies = organic flicker
                 const flicker =
                     Math.sin(t * 7.3  + phase)        * 0.18 +
                     Math.sin(t * 13.7 + phase * 1.3)  * 0.10 +
                     Math.sin(t * 3.1  + phase * 0.7)  * 0.08 +
-                    Math.random()                      * 0.06; // tiny random spike
+                    Math.random()                      * 0.06;
                 light.intensity = Math.max(0, baseIntensity * (1.0 + flicker));
                 fill.intensity  = Math.max(0, baseIntensity * 0.35 * (1.0 + flicker * 0.5));
-
-                // Slight colour temperature shift — flicker between orange and deep amber
                 const r = Math.min(1, 1.0);
                 const g = Math.max(0.18, 0.30 + flicker * 0.15);
                 light.color.setRGB(r, g, 0.02);
             });
 
-            // === COLLISION: block player from walking through closed door ===
-            // Check if door is lifted enough to walk under (lift > 2.5 means door is mostly up)
+            // 4. --- HOURGLASS & TIMER LOGIC (HTML overlay, top-right of page) ---
+            // Only count down when timer is unpaused
+            if (timeRemaining > 0 && !timerPaused) {
+                timeRemaining = Math.max(0, timeRemaining - dt);
+                const progress = Math.max(0, timeRemaining / 600);
+
+                if (timerTextPanel && timerTextPanel.isHTML) {
+                    const mins = Math.floor(timeRemaining / 60);
+                    const secs = Math.floor(timeRemaining % 60);
+                    const timeString = `${mins}:${secs.toString().padStart(2, '0')}`;
+                    if (timerTextPanel.userData.lastTime !== timeString) {
+                        timerTextPanel.valueEl.textContent = timeString;
+                        timerTextPanel.fillEl.style.width = `${progress * 100}%`;
+
+                        // Animate the SVG hourglass sand: top drains, bottom fills
+                        if (timerTextPanel.hgSandTop && timerTextPanel.hgSandBot) {
+                            // Top sand polygon — shrinks from full triangle (y:6→28) to nothing
+                            // Original full: 7,6 37,6 24,28 22,28 20,28 7,6
+                            // As progress goes 1→0, the top point of the sand drops from y=6 to y=28
+                            const topY = 6 + (1 - progress) * 22; // y=6 (full) to y=28 (empty)
+                            const topW = progress * 15; // width at top
+                            timerTextPanel.hgSandTop.setAttribute('points',
+                                `${22 - topW},${topY} ${22 + topW},${topY} 24,28 22,28 20,28 ${22 - topW},${topY}`
+                            );
+                            // Bottom sand polygon — grows from nothing at point (22,55) to full triangle
+                            // Full: 6,55 38,55 24,31 ...
+                            const botProgress = 1 - progress;
+                            const botY = 55 - botProgress * 24; // peak rises from y=55 to y=31
+                            const botW = botProgress * 16;
+                            timerTextPanel.hgSandBot.setAttribute('points',
+                                `${22 - botW},55 ${22 + botW},55 22,${botY} ${22 - botW},55`
+                            );
+                        }
+
+                        // Color shift
+                        if (timeRemaining < 30) {
+                            timerTextPanel.valueEl.style.color = '#ff4040';
+                            timerTextPanel.fillEl.style.background = 'linear-gradient(90deg, #ff4040, #ff8040)';
+                        } else if (timeRemaining < 120) {
+                            timerTextPanel.valueEl.style.color = '#ff9020';
+                            timerTextPanel.fillEl.style.background = 'linear-gradient(90deg, #ff9020, #FFD700)';
+                        } else {
+                            timerTextPanel.valueEl.style.color = '#FFD700';
+                        }
+                        timerTextPanel.userData.lastTime = timeString;
+                    }
+                }
+            } else if (timerTextPanel && timerTextPanel.isHTML && timerTextPanel.userData.lastTime !== '0:00') {
+                timerTextPanel.valueEl.textContent = '0:00';
+                timerTextPanel.valueEl.style.color = '#ff4040';
+                timerTextPanel.fillEl.style.width = '0%';
+                timerTextPanel.userData.lastTime = '0:00';
+            }
+
+            // 5. --- DOOR COLLISION & ANIMATION ---
             if (scene.userData.DOOR_Z !== undefined) {
                 const doorLift = scene.userData.doorSlab ? (scene.userData.doorSlab.position.y - scene.userData.doorSlab.userData.closedY) : 0;
                 if (doorLift < 2.5 && cameraRig.position.z > scene.userData.DOOR_Z - 0.5) {
@@ -1545,17 +2244,56 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
                 }
             }
 
-            // === LEVER ANIMATION ===
+            // Portcullis sliding logic
+            if (scene.userData.doorSlab && scene.userData.doorOpen && scene.userData.doorT < 1) {
+                scene.userData.doorT = Math.min(1, scene.userData.doorT + 0.018);
+                const ease = 1 - Math.pow(1 - scene.userData.doorT, 2);
+                scene.userData.doorSlab.position.y = scene.userData.doorSlab.userData.closedY + (ease * 4.0);
+            }
+
+            // === LEVER RISING ANIMATION (after key inserted into stand) ===
+            if (scene.userData.leverRising && scene.userData.leverGroup && scene.userData.leverRiseT < 1) {
+                scene.userData.leverRiseT = Math.min(1, scene.userData.leverRiseT + 0.012);
+                const ease = 1 - Math.pow(1 - scene.userData.leverRiseT, 3);
+                const startY = scene.userData.leverHiddenY;
+                const endY = scene.userData.leverFinalY;
+                scene.userData.leverGroup.position.y = startY + (endY - startY) * ease;
+            }
+
+            // === KEY-IN-KEYHOLE PROXIMITY DETECTION ===
+            // If the player is carrying the key and brings it near the keyhole, auto-insert it
+            if (scene.userData.keyObtained && !scene.userData.keyInserted && scene.userData.keyholeStand) {
+                // Find the held key in the scene
+                let heldKey = null;
+                scene.traverse(obj => {
+                    if (!heldKey && obj.userData?.type === 'chestKey' && obj.userData?.grabbed && obj.visible) {
+                        heldKey = obj;
+                    }
+                });
+                if (heldKey) {
+                    // Get world positions
+                    const keyPos = new THREE.Vector3();
+                    heldKey.getWorldPosition(keyPos);
+                    // Keyhole center: keyholeStand position + local (0, 0.7, 0.30) rotated by stand's rotation
+                    // The stand is at (4.2, 0, -12) rotated by -π/2 around y → local +z becomes world -x
+                    // So local (0, 0.7, 0.30) → world (4.2 - 0.30, 0.7, -12) = (3.9, 0.7, -12)
+                    const keyholePos = new THREE.Vector3(3.9, 0.7, -12);
+                    const dist = keyPos.distanceTo(keyholePos);
+                    if (dist < 0.4) {
+                        console.log('🗝 Key brought near keyhole — inserting!');
+                        insertKeyIntoStand();
+                    }
+                }
+            }
+
+            // === LEVER PULL ANIMATION ===
             if (scene.userData.leverPulled && leverArm && (scene.userData.leverT || 0) < 1) {
                 scene.userData.leverT = Math.min(1, (scene.userData.leverT || 0) + 0.025);
                 const lt = scene.userData.leverT;
                 const angle = lt * Math.PI * 0.5;
-                // Arm pivots from its BASE (bracket), which is at local y=0, z=0.25
-                // Move arm so its base is at local y=0 then rotate, then reposition
-                const L = 0.35; // half-arm length
+                const L = 0.35;
                 leverArm.position.set(0, L * Math.cos(angle), 0.25 + L * Math.sin(angle));
                 leverArm.rotation.x = angle;
-                // Knob follows the top of the arm
                 if (leverArm.userData.knob) {
                     leverArm.userData.knob.position.set(
                         0,
@@ -1563,20 +2301,17 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
                         0.25 + (2 * L) * Math.sin(angle)
                     );
                 }
-                // Switch indicator light from red to green
                 if (leverArm.userData.light) {
                     leverArm.userData.light.color.setHex(0x20FF20);
                 }
             }
 
-            // === BACKGROUND: show Egypt sky once lever is pulled (door opening = sky visible) ===
+            // === BACKGROUND: show Egypt sky once lever is pulled ===
             if (scene.userData.egyptStartZ !== undefined) {
                 if (scene.userData.leverPulled) {
-                    // Lever pulled → door opening → show Egypt sky
                     scene.fog = null;
                     scene.background = scene.userData.egyptBg || new THREE.Color(0x4A9AE8);
                 } else {
-                    // Still locked in tomb
                     if (!scene.fog) scene.fog = new THREE.FogExp2(0x0A0402, 0.018);
                     scene.background = scene.userData.tombBg || new THREE.Color(0x0A0402);
                 }
@@ -1590,15 +2325,31 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
                 if (scene.userData.doorOpen && scene.userData.doorT < 1) {
                     scene.userData.doorT = Math.min(1, scene.userData.doorT + 0.018);
                     const t = scene.userData.doorT;
-                    // Ease-out for smooth stop at top
                     const ease = 1 - Math.pow(1 - t, 2);
-                    const lift = ease * 4.0; // total lift distance
+                    const lift = ease * 4.0;
                     scene.userData.doorSlab.position.y = scene.userData.doorSlab.userData.closedY + lift;
                 }
             }
-puzzle1UpdateHover([controller1, controller2], raycaster);
+
+            // === YOU ESCAPED detection — when player walks past the door ===
+            // Trigger on any of these: door is open AND player past threshold, OR test mode
+            if (!scene.userData.escaped) {
+                const playerZ = cameraRig.position.z;
+                const doorZ = scene.userData.DOOR_Z || 6.2;
+                if (scene.userData.doorOpen && playerZ > doorZ + 0.5) {
+                    console.log('🏆 Escape triggered! playerZ:', playerZ, 'doorZ:', doorZ);
+                    scene.userData.escaped = true;
+                    showEscapedSign();
+                }
+            }
+
+            // 6. --- PUZZLE UPDATES & RENDER ---
+            puzzle1UpdateHover([controller1, controller2], raycaster);
             renderer.render(scene, camera);
         }
+
+        // Ensure the loop is started correctly
+        renderer.setAnimationLoop(animate);
 
     </script>
 </body>

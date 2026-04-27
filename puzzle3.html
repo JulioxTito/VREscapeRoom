@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Puzzle 3 — Treasure Chest</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #1a0f06; font-family: serif; }
+        #info {
+            position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
+            background: rgba(20, 8, 2, 0.85); color: #FFD700; padding: 10px 22px;
+            border: 2px solid #DAA520; border-radius: 4px; font-size: 14px;
+            text-align: center; z-index: 10; pointer-events: none;
+        }
+        #info b { color: #FFE680; }
+        #status {
+            position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+            background: rgba(20, 8, 2, 0.85); color: #FFD700; padding: 8px 22px;
+            border: 1px solid #DAA520; border-radius: 4px; font-size: 14px; z-index: 10;
+        }
+    </style>
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+</head>
+<body>
+    
+    <div id="status">Sun: 0   ·   Scarab: 0   ·   Ankh: 0</div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // ─── SCENE SETUP ───
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a0f06);
+
+        const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(0, 1.2, 2.8);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.target.set(0, 0.5, 0);
+        controls.enablePan = false;
+        controls.minDistance = 1.5;
+        controls.maxDistance = 5;
+        controls.update();
+
+        // ─── LIGHTING ───
+        scene.add(new THREE.AmbientLight(0xffe4b0, 0.5));
+        const keyLight = new THREE.DirectionalLight(0xfff0c0, 1.5);
+        keyLight.position.set(2, 4, 3);
+        keyLight.castShadow = true;
+        scene.add(keyLight);
+        const fillLight = new THREE.PointLight(0xff8030, 1.0, 8);
+        fillLight.position.set(-2, 1, 1);
+        scene.add(fillLight);
+
+        // ─── PASSWORD ───
+        // The user counts each symbol around the tomb room and enters the count on the matching dial
+        // Dial 1 = count of suns, Dial 2 = count of scarabs, Dial 3 = count of ankhs
+        // Set these to match how many of each symbol you place around the room
+        const SECRET_CODE = [4, 2, 7]; // example: 4 suns, 2 scarabs, 7 ankhs in the room
+        const SYMBOL_NAMES = ['Sun', 'Scarab', 'Ankh'];
+        const currentCode = [0, 0, 0];
+
+        // ─── TEXTURES (procedural canvas) ───
+        function woodTexture() {
+            const c = document.createElement('canvas');
+            c.width = 256; c.height = 256;
+            const x = c.getContext('2d');
+            const grad = x.createLinearGradient(0, 0, 256, 0);
+            grad.addColorStop(0, '#5a2c0a');
+            grad.addColorStop(0.5, '#6e3812');
+            grad.addColorStop(1, '#5a2c0a');
+            x.fillStyle = grad; x.fillRect(0, 0, 256, 256);
+            // wood grain streaks
+            x.strokeStyle = 'rgba(20, 8, 0, 0.35)';
+            x.lineWidth = 1.5;
+            for (let i = 0; i < 30; i++) {
+                x.beginPath();
+                const y = i * 8 + Math.random() * 6;
+                x.moveTo(0, y);
+                x.bezierCurveTo(80, y + Math.sin(i) * 4, 180, y - Math.sin(i) * 5, 256, y);
+                x.stroke();
+            }
+            return new THREE.CanvasTexture(c);
+        }
+        
+        function goldOrnamentTexture() {
+            const c = document.createElement('canvas');
+            c.width = 128; c.height = 128;
+            const x = c.getContext('2d');
+            x.fillStyle = '#b8860b';
+            x.fillRect(0, 0, 128, 128);
+            // ornate pattern
+            x.strokeStyle = '#ffd700';
+            x.lineWidth = 3;
+            x.strokeRect(8, 8, 112, 112);
+            x.strokeRect(20, 20, 88, 88);
+            // diamond in centre
+            x.beginPath();
+            x.moveTo(64, 32); x.lineTo(96, 64); x.lineTo(64, 96); x.lineTo(32, 64);
+            x.closePath(); x.stroke();
+            return new THREE.CanvasTexture(c);
+        }
+
+        const woodTex = woodTexture();
+        const goldTex = goldOrnamentTexture();
+
+        // ─── CHEST GROUP (so we can position everything) ───
+        const chest = new THREE.Group();
+        chest.position.y = 0;
+        scene.add(chest);
+
+        // ─── CHEST BASE (rectangular box body) ───
+        const baseW = 2.4, baseH = 1.2, baseD = 1.35;
+        const baseGeom = new THREE.BoxGeometry(baseW, baseH, baseD);
+        const baseMat = new THREE.MeshStandardMaterial({
+            map: woodTex, roughness: 0.7, metalness: 0.05
+        });
+        const base = new THREE.Mesh(baseGeom, baseMat);
+        base.position.y = baseH / 2;
+        base.castShadow = true; base.receiveShadow = true;
+        chest.add(base);
+
+        // ─── CHEST LID (curved arched top — half cylinder) ───
+        const lidPivot = new THREE.Group();
+        lidPivot.position.set(0, baseH, -baseD / 2);  // hinge along back top edge
+        chest.add(lidPivot);
+
+        // Half-cylinder lid
+        const lidGeom = new THREE.CylinderGeometry(baseD / 2, baseD / 2, baseW, 24, 1, false, 0, Math.PI);
+        const lidMat = baseMat.clone();
+        lidMat.map = woodTex;
+        const lid = new THREE.Mesh(lidGeom, lidMat);
+        lid.rotation.z = Math.PI / 2;  // lay it flat
+        lid.position.set(0, 0, baseD / 2);  // sit on top of base, hinge at back
+        lid.castShadow = true; lid.receiveShadow = true;
+        lidPivot.add(lid);
+
+        // ─── GOLD BANDS on chest body ───
+        const bandMat = new THREE.MeshStandardMaterial({
+            color: 0xDAA520, metalness: 0.8, roughness: 0.25,
+            emissive: 0x2a1500, emissiveIntensity: 0.4
+        });
+        // Horizontal bands
+        [0.15, 0.65].forEach(y => {
+            const band = new THREE.Mesh(
+                new THREE.BoxGeometry(baseW + 0.005, 0.04, baseD + 0.005),
+                bandMat
+            );
+            band.position.y = y;
+            chest.add(band);
+        });
+        // Vertical front bands
+        [-0.55, 0, 0.55].forEach(xOff => {
+            const vband = new THREE.Mesh(
+                new THREE.BoxGeometry(0.04, baseH + 0.005, 0.02),
+                bandMat
+            );
+            vband.position.set(xOff, baseH / 2, baseD / 2 + 0.005);
+            chest.add(vband);
+        });
+
+        // ─── GOLD CORNERS (decorative ornamental triangles) ───
+        const ornMat = new THREE.MeshStandardMaterial({
+            map: goldTex, color: 0xDAA520, metalness: 0.85, roughness: 0.2,
+            emissive: 0x3a2000, emissiveIntensity: 0.5
+        });
+        [[-baseW/2, 0, baseD/2], [baseW/2, 0, baseD/2],
+         [-baseW/2, baseH, baseD/2], [baseW/2, baseH, baseD/2]].forEach(([x, y, z]) => {
+            const corner = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.13, 0.025), ornMat);
+            corner.position.set(x, y, z + 0.005);
+            chest.add(corner);
+        });
+
+        // Lid bands (gold)
+        [0, baseW/4, -baseW/4].forEach((xOff, i) => {
+            const lband = new THREE.Mesh(
+                new THREE.TorusGeometry(baseD / 2 + 0.005, 0.018, 6, 16, Math.PI),
+                bandMat
+            );
+            lband.rotation.y = Math.PI / 2;
+            lband.position.set(xOff, 0, baseD / 2);
+            lidPivot.add(lband);
+        });
+
+        // ─── COMBINATION DIALS ───
+        const dials = [];
+        const DIAL_RADIUS = 0.16;
+        const DIAL_W = 0.16;
+        const dialPositions = [-0.7, 0, 0.7];
+
+        // ─── DIAL TEXTURES — draw 3 Egyptian symbols (sun, scarab, ankh) ───
+        function drawSun(ctx, cx, cy, size, color) {
+            // central disc
+            ctx.fillStyle = color;
+            ctx.beginPath(); ctx.arc(cx, cy, size * 0.35, 0, Math.PI * 2); ctx.fill();
+            // rays radiating downward (like image 1)
+            ctx.strokeStyle = color;
+            ctx.lineWidth = size * 0.05;
+            for (let i = 0; i < 14; i++) {
+                const a = -Math.PI / 2 + (i - 7) * 0.18;
+                ctx.beginPath();
+                ctx.moveTo(cx + Math.cos(a) * size * 0.4, cy + Math.sin(a) * size * 0.4);
+                ctx.lineTo(cx + Math.cos(a) * size * 0.95, cy + Math.sin(a) * size * 0.95);
+                ctx.stroke();
+            }
+        }
+        function drawScarab(ctx, cx, cy, size, color) {
+            // scarab body — oval
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.ellipse(cx, cy, size * 0.45, size * 0.6, 0, 0, Math.PI * 2);
+            ctx.fill();
+            // wing line down centre
+            ctx.strokeStyle = '#3a1a02'; ctx.lineWidth = size * 0.04;
+            ctx.beginPath(); ctx.moveTo(cx, cy - size * 0.5); ctx.lineTo(cx, cy + size * 0.5); ctx.stroke();
+            // horizontal divisions
+            for (let i = 1; i < 4; i++) {
+                ctx.beginPath();
+                ctx.moveTo(cx - size * 0.4, cy - size * 0.4 + i * size * 0.25);
+                ctx.lineTo(cx + size * 0.4, cy - size * 0.4 + i * size * 0.25);
+                ctx.stroke();
+            }
+            // legs
+            ctx.lineWidth = size * 0.05;
+            for (let i = -1; i <= 1; i += 2) {
+                ctx.beginPath();
+                ctx.moveTo(cx + i * size * 0.45, cy - size * 0.3);
+                ctx.lineTo(cx + i * size * 0.7, cy - size * 0.45);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(cx + i * size * 0.45, cy);
+                ctx.lineTo(cx + i * size * 0.75, cy);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(cx + i * size * 0.45, cy + size * 0.3);
+                ctx.lineTo(cx + i * size * 0.7, cy + size * 0.45);
+                ctx.stroke();
+            }
+        }
+        function drawAnkh(ctx, cx, cy, size, color) {
+            ctx.fillStyle = color;
+            ctx.strokeStyle = color;
+            ctx.lineWidth = size * 0.08;
+            // top loop (teardrop / oval)
+            ctx.beginPath();
+            ctx.ellipse(cx, cy - size * 0.45, size * 0.28, size * 0.35, 0, 0, Math.PI * 2);
+            ctx.fill();
+            // hollow centre of loop
+            ctx.fillStyle = '#1a0a02';
+            ctx.beginPath();
+            ctx.ellipse(cx, cy - size * 0.45, size * 0.16, size * 0.22, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = color;
+            // horizontal cross-bar
+            ctx.fillRect(cx - size * 0.45, cy - size * 0.10, size * 0.9, size * 0.14);
+            // vertical stem
+            ctx.fillRect(cx - size * 0.10, cy - size * 0.10, size * 0.20, size * 0.85);
+        }
+
+        function makeDialTexture(highlightDigit = null) {
+            const c = document.createElement('canvas');
+            c.width = 1024; c.height = 256;
+            const x = c.getContext('2d');
+            // Dark wood background
+            x.fillStyle = '#1a0a02';
+            x.fillRect(0, 0, 1024, 256);
+            // 10 digits 0-9 evenly spaced around the dial
+            x.font = 'bold 160px "Times New Roman"'; 
+            x.textAlign = 'center';
+            x.textBaseline = 'middle';
+            for (let i = 0; i < 10; i++) {
+                const segX = (i + 0.5) * (1024 / 10);
+                const isHL = (i === highlightDigit);
+                // Glow / outline for current value
+                if (isHL) {
+                    x.shadowColor = '#FFE680';
+                    x.shadowBlur = 30;
+                    x.fillStyle = '#FFFFCC';
+                } else {
+                    x.shadowBlur = 0;
+                    x.fillStyle = '#DAA520';
+                }
+                x.fillText(i, segX, 128);
+            }
+            x.shadowBlur = 0;
+            // Top/bottom decorative band lines
+            x.fillStyle = '#8B6914';
+            x.fillRect(0, 0, 1024, 12);
+            x.fillRect(0, 244, 1024, 12);
+            return new THREE.CanvasTexture(c);
+        }
+
+        dialPositions.forEach((xPos, idx) => {
+            const dialGeom = new THREE.CylinderGeometry(DIAL_RADIUS, DIAL_RADIUS, DIAL_W, 32);
+            const dialMat = new THREE.MeshStandardMaterial({
+                map: makeDialTexture(),
+                roughness: 0.5, metalness: 0.6,
+                emissive: 0x2a1500, emissiveIntensity: 0.3
+            });
+            const dial = new THREE.Mesh(dialGeom, dialMat);
+            dial.rotation.z = Math.PI / 2; // lay on side so digits face out
+            dial.position.set(xPos, baseH * 0.5, baseD / 2 + 0.04);
+            dial.userData = { type: 'dial', index: idx, value: 0 };
+            dial.castShadow = true;
+            chest.add(dial);
+            dials.push(dial);
+
+            // Pointer/notch above each dial showing current selection
+            const notch = new THREE.Mesh(
+                new THREE.ConeGeometry(0.025, 0.05, 4),
+                bandMat
+            );
+            notch.position.set(xPos, baseH * 0.5 + DIAL_RADIUS + 0.05, baseD / 2 + 0.04);
+            notch.rotation.x = Math.PI;
+            chest.add(notch);
+
+            // ── Symbol panel sitting on top of each dial — tells user what to count ──
+            // Dial 0 = sun count, Dial 1 = scarab count, Dial 2 = ankh count
+            const symC = document.createElement('canvas');
+            symC.width = 256; symC.height = 256;
+            const symCtx = symC.getContext('2d');
+            // ornate gold background plate
+            symCtx.fillStyle = '#1a0a02';
+            symCtx.fillRect(0, 0, 256, 256);
+            symCtx.fillStyle = '#8B6914';
+            symCtx.fillRect(8, 8, 240, 240);
+            symCtx.fillStyle = '#1a0a02';
+            symCtx.fillRect(16, 16, 224, 224);
+            // border
+            symCtx.strokeStyle = '#DAA520';
+            symCtx.lineWidth = 2;
+            symCtx.strokeRect(20, 20, 216, 216);
+            // draw the symbol that THIS dial counts
+            if (idx === 0) drawSun(symCtx, 128, 128, 95, '#FFE680');
+            else if (idx === 1) drawScarab(symCtx, 128, 128, 90, '#FFE680');
+            else drawAnkh(symCtx, 128, 128, 95, '#FFE680');
+            const symTex = new THREE.CanvasTexture(symC);
+            const symPlate = new THREE.Mesh(
+                new THREE.PlaneGeometry(0.25, 0.25),
+                new THREE.MeshBasicMaterial({ map: symTex, transparent: true })
+            );
+            symPlate.position.set(xPos, baseH * 0.5 + DIAL_RADIUS + 0.22, baseD / 2 + 0.04);
+            chest.add(symPlate);
+        });
+
+        // ─── KEYHOLE / LOCK PLATE ───
+        const lockPlateGeom = new THREE.BoxGeometry(0.18, 0.22, 0.025);
+        const lockPlate = new THREE.Mesh(lockPlateGeom, ornMat);
+        lockPlate.position.set(0, baseH + 0.05, baseD / 2 + 0.005);
+        chest.add(lockPlate);
+        const keyholeGeom = new THREE.RingGeometry(0.015, 0.035, 16);
+        const keyholeMat = new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.DoubleSide });
+        const keyhole = new THREE.Mesh(keyholeGeom, keyholeMat);
+        keyhole.position.set(0, baseH + 0.07, baseD / 2 + 0.025);
+        chest.add(keyhole);
+
+        // ─── KEY (hidden inside chest, revealed when opened, then grabbable) ───
+        const keyGroup = new THREE.Group();
+        keyGroup.visible = false;
+        keyGroup.userData = { grabbable: false }; // becomes true after chest opens
+
+        const keyShaftMat = new THREE.MeshStandardMaterial({
+            color: 0xFFD700, metalness: 0.95, roughness: 0.15,
+            emissive: 0x6a4500, emissiveIntensity: 0.6
+        });
+
+        // Key bow (round head)
+        const keyBow = new THREE.Mesh(
+            new THREE.TorusGeometry(0.08, 0.022, 12, 24),
+            keyShaftMat
+        );
+        keyBow.rotation.x = Math.PI / 2;
+        keyBow.position.set(0, 0.3, 0);
+        keyGroup.add(keyBow);
+
+        // Key shaft
+        const keyShaft = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.018, 0.018, 0.35, 8),
+            keyShaftMat
+        );
+        keyShaft.position.set(0, 0.06, 0);
+        keyGroup.add(keyShaft);
+
+        // Key teeth/wards
+        const tooth1 = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.04, 0.03), keyShaftMat);
+        tooth1.position.set(0.025, -0.08, 0);
+        keyGroup.add(tooth1);
+        const tooth2 = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.03, 0.03), keyShaftMat);
+        tooth2.position.set(0.022, -0.13, 0);
+        keyGroup.add(tooth2);
+
+        // Position key inside the chest, will rise up when unlocked
+        keyGroup.position.set(0, baseH * 0.4, 0);
+        chest.add(keyGroup);
+
+        // Reference variable for the key (used in click handler)
+        const key = keyGroup;
+        let keyGrabbed = false;
+        let keyFloatT = 0;
+
+        // ─── INTERACTIVITY (raycasting for clicks) ───
+        const raycaster = new THREE.Raycaster();
+        const pointer = new THREE.Vector2();
+        let unlocked = false;
+
+        function updateDial(dial) {
+            const idx = dial.userData.index;
+            const value = dial.userData.value;
+            // Update texture to highlight current digit
+            const newTex = makeDialTexture(value);
+            dial.material.map = newTex;
+            dial.material.needsUpdate = true;
+            // 10 digits per full rotation — bring current value to top
+            const targetAngle = -(value / 10) * Math.PI * 2;
+            dial.rotation.x = targetAngle;
+
+            currentCode[idx] = value;
+            document.getElementById('status').textContent =
+                `${SYMBOL_NAMES[0]}: ${currentCode[0]}   ·   ${SYMBOL_NAMES[1]}: ${currentCode[1]}   ·   ${SYMBOL_NAMES[2]}: ${currentCode[2]}`;
+
+            checkUnlock();
+        }
+
+        function checkUnlock() {
+            if (unlocked) return;
+            if (currentCode[0] === SECRET_CODE[0] &&
+                currentCode[1] === SECRET_CODE[1] &&
+                currentCode[2] === SECRET_CODE[2]) {
+                unlocked = true;
+                openChest();
+            }
+        }
+
+        function openChest() {
+            document.getElementById('status').innerHTML =
+                '<span style="color:#80ff80">★ UNLOCKED ★</span> — Click the key to grab it!';
+            const startTime = performance.now();
+            const lidDuration = 1500;
+            const keyDelay = 800;
+
+            function animateOpen() {
+                const elapsed = performance.now() - startTime;
+                const t = Math.min(1, elapsed / lidDuration);
+                const ease = 1 - Math.pow(1 - t, 3);
+                lidPivot.rotation.x = -ease * Math.PI * 0.55;
+
+                if (elapsed > keyDelay) {
+                    keyGroup.visible = true;
+                    const kt = Math.min(1, (elapsed - keyDelay) / 1500);
+                    const ke = 1 - Math.pow(1 - kt, 2);
+                    keyGroup.position.y = baseH * 0.4 + ke * 0.6;
+                    keyGroup.rotation.y = ke * Math.PI * 2;
+
+                    // Once fully risen, mark as grabbable
+                    if (kt >= 1 && !key.userData.grabbable) {
+                        key.userData.grabbable = true;
+                    }
+                }
+
+                if (t < 1 || performance.now() - startTime - keyDelay < 1500) {
+                    requestAnimationFrame(animateOpen);
+                }
+            }
+            animateOpen();
+        }
+
+        function grabKey() {
+            if (keyGrabbed) return;
+            keyGrabbed = true;
+            document.getElementById('status').innerHTML =
+                '<span style="color:#FFD700">✓ KEY OBTAINED!</span> — Puzzle complete';
+
+            // Animate key flying toward camera and disappearing into "inventory"
+            const startTime = performance.now();
+            const startPos = keyGroup.position.clone();
+            const targetPos = new THREE.Vector3(0, 1.4, 1.5); // toward camera
+            const startScale = keyGroup.scale.x;
+
+            function flyToInventory() {
+                const elapsed = performance.now() - startTime;
+                const t = Math.min(1, elapsed / 1000);
+                const ease = t * t;
+                keyGroup.position.lerpVectors(startPos, targetPos, ease);
+                keyGroup.rotation.y += 0.3;
+                keyGroup.scale.setScalar(startScale * (1 - ease * 0.7));
+                if (t < 1) {
+                    requestAnimationFrame(flyToInventory);
+                } else {
+                    keyGroup.visible = false;
+                    // Show inventory icon top-right indicating key is held
+                    showInventoryKey();
+                }
+            }
+            flyToInventory();
+
+            // Notify parent (when integrated into index.html)
+            if (window.puzzle3 && window.puzzle3.onKeyGrabbed) {
+                window.puzzle3.onKeyGrabbed();
+            }
+        }
+
+        function showInventoryKey() {
+            const inv = document.createElement('div');
+            inv.style.cssText = `
+                position:fixed; top:12px; right:12px; z-index:11;
+                background: rgba(20,8,2,0.85); border: 2px solid #FFD700;
+                border-radius: 6px; padding: 8px 14px; color: #FFD700;
+                font-family: serif; font-size: 14px; font-weight: bold;
+            `;
+            inv.innerHTML = '🗝 KEY OBTAINED';
+            document.body.appendChild(inv);
+        }
+
+        function onClick(event) {
+            if (unlocked) return;
+            pointer.x = (event.clientX / window.innerWidth) * 2 - 1;
+            pointer.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            raycaster.setFromCamera(pointer, camera);
+
+            // First check if the key was clicked (after unlock)
+            if (key && key.userData.grabbable) {
+                const keyHits = raycaster.intersectObject(keyGroup, true);
+                if (keyHits.length > 0) {
+                    grabKey();
+                    return;
+                }
+            }
+
+            const hits = raycaster.intersectObjects(dials);
+            if (hits.length > 0) {
+                const dial = hits[0].object;
+                // Click cycles the dial through digits 0-9
+                dial.userData.value = (dial.userData.value + 1) % 10;
+                updateDial(dial);
+            }
+        }
+        renderer.domElement.addEventListener('click', onClick);
+
+        // Initialize dial textures with digit 0 highlighted
+        dials.forEach(d => updateDial(d));
+        // Reset code display
+        currentCode[0] = 0; currentCode[1] = 0; currentCode[2] = 0;
+        document.getElementById('status').textContent =
+            `${SYMBOL_NAMES[0]}: 0   ·   ${SYMBOL_NAMES[1]}: 0   ·   ${SYMBOL_NAMES[2]}: 0`;
+
+        // ─── RESIZE ───
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // ─── ANIMATE ───
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+
+            // Gentle bobbing + spinning for the unlocked key while waiting to be grabbed
+            if (key.userData.grabbable && !keyGrabbed) {
+                keyFloatT += 0.02;
+                key.position.y = baseH * 0.4 + 0.6 + Math.sin(keyFloatT) * 0.04;
+                key.rotation.y += 0.015;
+            }
+
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // Expose for debugging / integration
+        window.puzzle3 = {
+            SECRET_CODE,
+            SYMBOL_NAMES,
+            currentCode,
+            isUnlocked: () => unlocked,
+            isKeyGrabbed: () => keyGrabbed,
+            onKeyGrabbed: null  // index.html can set this callback
+        };
+        console.log('Puzzle 3 secret code (counts):',
+            `${SYMBOL_NAMES[0]}=${SECRET_CODE[0]}, ${SYMBOL_NAMES[1]}=${SECRET_CODE[1]}, ${SYMBOL_NAMES[2]}=${SECRET_CODE[2]}`);
+    </script>
+</body>
+</html>
