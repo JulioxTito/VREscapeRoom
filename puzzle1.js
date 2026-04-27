@@ -100,7 +100,7 @@ export function puzzle1TryRelease(controller) {
     const snapPos = getSnapPosition(piece.userData.index);
     const dist = worldPos.distanceTo(snapPos);
 
-    if (dist < 1.2) {
+    if (dist < 0.45) {
         snapPiece(piece);
     }
 
