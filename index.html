@@ -12,6 +12,7 @@
 
 <body>
     <audio id="bgMusic" src="Assets/audio/tomb_music.mp3" loop></audio>
+    <audio id="screamSound" src="Assets/audio/scream_man.mp3"></audio>
 
     <script type="importmap">
         {
@@ -2216,6 +2217,8 @@ function showLockMessage(msg) {
             el._t = setTimeout(() => el.style.opacity = '0', 2000);
         }
         function triggerGameOver() {
+            var scream = document.getElementById('screamSound');
+            if (scream) scream.play().catch(function() {});
             var sign = document.createElement('div');
             sign.style.position = 'fixed';
             sign.style.top = '0';
