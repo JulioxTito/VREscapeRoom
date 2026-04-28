@@ -111,6 +111,20 @@ import { initPuzzle2, puzzle2TryGrab, puzzle2TryRelease, puzzle2UpdateHover, puz
         });
 
         let gamePhase = 'tomb';
+        window.addEventListener('puzzle1Solved', () => {
+            station1Solved = true; window._station1Solved = true;
+            const d = scene.getObjectByName('station2Dark');
+            if (d) scene.remove(d);
+            const l = scene.getObjectByName('station2Light');
+            if (l) l.intensity = 4.5;
+        });
+        window.addEventListener('puzzle2Solved', () => {
+            station2Solved = true; window._station2Solved = true;
+            const d = scene.getObjectByName('station3Dark');
+            if (d) scene.remove(d);
+            const l = scene.getObjectByName('station3Light');
+            if (l) l.intensity = 4.5;
+        });
         let grabbableObjects = [];
         const intersected = [];
 
@@ -160,7 +174,7 @@ import { initPuzzle2, puzzle2TryGrab, puzzle2TryRelease, puzzle2UpdateHover, puz
         // Hourglass & Timer State
         let hourglassGroup; // This will be attached to the camera
         let hourglassSandTop, hourglassSandBottom;
-        let timeRemaining = 600; // 10 minutes
+        let timeRemaining = 240; // 10 minutes
         let timerPaused = true;  // start paused — user clicks play to begin
         let lastTimestamp = 0;
         let timerTextPanel = null;
@@ -294,7 +308,8 @@ import { initPuzzle2, puzzle2TryGrab, puzzle2TryRelease, puzzle2UpdateHover, puz
                         console.log('Lever pulled via mouse click!');
                         return;
                     }
-                    if (o.userData.type === 'dial') {
+                   if (o.userData.type === 'dial') {
+                        if (!station2Solved) { showLockMessage('Balance the Scales first!'); return; }
                         const chest = o.parent;
                         if (chest && chest.userData.updateDial && !chest.userData.isUnlocked()) {
                             o.userData.value = (o.userData.value + 1) % 10;
@@ -790,8 +805,16 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
             s2Light.position.set(-6, 3.5, -22);
             scene.add(s2Light);
             puzzle2RegisterRefs(scaleBeamMesh, scalePanLeft, scalePanRight);
+            // Dark overlay — remove this when puzzle 1 is solved
+           const s2Dark = new THREE.Mesh(
+                new THREE.BoxGeometry(8, 5, 8),
+                new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.55, side: THREE.FrontSide })
+            );
+            s2Dark.position.set(-6, 2.5, -22);
+            s2Dark.name = 'station2Dark';
+            scene.add(s2Dark);
         }
-
+// not the actual 3th puzzle but the pole to escape. 
         function buildStation3() {
             const podMat = new THREE.MeshStandardMaterial({ color: 0x7A6A50, roughness: 0.7 });
             const pod = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.0, 0.5), podMat);
@@ -816,6 +839,15 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
             s3Light.position.set(6, 3.5, -12);
             scene.add(s3Light);
 
+            // this is the dark overlay, i removed it for now. 
+           /* const s3Dark = new THREE.Mesh(
+                new THREE.BoxGeometry(6, 5, 6),
+                new THREE.MeshStandardMaterial({ color: 0x000000, transparent: true, opacity: 0.55, side: THREE.BackSide })
+            );
+            s3Dark.position.set(6, 2.5, -12);
+            s3Dark.name = 'station3Dark';
+            scene.add(s3Dark);
+*/
             // ── KEYHOLE STAND — sits next to the lever pod, accepts the chest key ──
             buildKeyholeStand();
         }
@@ -1015,6 +1047,15 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
             const stationGroup = new THREE.Group();
             stationGroup.position.set(6, 0, -22);
             scene.add(stationGroup);
+
+//dark overlay, 4th (actual 3th puzzle)
+            const s4Dark = new THREE.Mesh(
+                new THREE.BoxGeometry(8, 5, 8),
+                new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.55, side: THREE.FrontSide })
+            );
+            s4Dark.position.set(6, 2.5, -22);
+            s4Dark.name = 'station3Dark';
+            scene.add(s4Dark);
 
             // 1. Build the table
             const tableMat = new THREE.MeshStandardMaterial({ color: 0x4a301d, roughness: 0.85 });
@@ -1857,7 +1898,8 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
 
             // ── Fallback to puzzle1's grab logic ──
             if (puzzle1TryGrab(controller, raycaster)) return;
-if (puzzle2TryGrab(controller, raycaster)) return;
+if (!station1Solved) { if (puzzle2TryGrab(controller, raycaster)) { showLockMessage('Complete the Tablet first!'); } }
+else if (puzzle2TryGrab(controller, raycaster)) return;
             // ── Default: just attach whatever was hit ──
             if (priorityHits.length > 0) {
                 const object = priorityHits[0].object;
@@ -2118,7 +2160,26 @@ if (puzzle2TryGrab(controller, raycaster)) return;
                 }
             }
         }
-
+function showLockMessage(msg) {
+            let el = document.getElementById('lockMsg');
+            if (!el) {
+                el = document.createElement('div');
+                el.id = 'lockMsg';
+                el.style.cssText = `
+                    position: fixed; top: 42%; left: 50%;
+                    transform: translateX(-50%);
+                    color: #FF4040; font-family: serif; font-size: 24px;
+                    text-align: center; pointer-events: none;
+                    text-shadow: 0 0 12px #FF0000;
+                    opacity: 0; transition: opacity 0.3s;
+                `;
+                document.body.appendChild(el);
+            }
+            el.textContent = msg;
+            el.style.opacity = '1';
+            clearTimeout(el._t);
+            el._t = setTimeout(() => el.style.opacity = '0', 2000);
+        }
         function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
@@ -2154,7 +2215,7 @@ if (puzzle2TryGrab(controller, raycaster)) return;
             // Only count down when timer is unpaused
             if (timeRemaining > 0 && !timerPaused) {
                 timeRemaining = Math.max(0, timeRemaining - dt);
-                const progress = Math.max(0, timeRemaining / 600);
+                const progress = Math.max(0, timeRemaining / 240);
 
                 if (timerTextPanel && timerTextPanel.isHTML) {
                     const mins = Math.floor(timeRemaining / 60);
