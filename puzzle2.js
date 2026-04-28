@@ -16,6 +16,7 @@ const SNAP_DISTANCE = 0.5;
 const PAN_RIGHT_POS = new THREE.Vector3(-5.58, 1.45, -22);
 
 let beamRef   = null;
+let _burstLight = null;
 let panLeftRef  = null;
 let panRightRef = null;
 
@@ -42,6 +43,9 @@ export function initPuzzle2(scene, camera, renderer) {
     buildLeftLabel();   // permanent "50" next to left pan
     buildRightLabel(0); // live total next to right pan, starts at 0
     createProgressUI();
+    _burstLight = new THREE.PointLight(0xFFD700, 0, 10);
+    _burstLight.position.set(-6, 2.0, -22);
+    _scene.add(_burstLight);
     console.log('✅ Puzzle 2 (Scale) initialised. Target:', TARGET_WEIGHT);
 }
 
@@ -500,10 +504,8 @@ function onPuzzleSolved() {
         <span style="font-size:14px; color:#FFA500;">Ma'at is satisfied...</span>
     `;
 
-    const burst = new THREE.PointLight(0xFFD700, 8, 10);
-    burst.position.set(-6, 2.0, -22);
-    _scene.add(burst);
-    setTimeout(() => _scene.remove(burst), 2000);
+    _burstLight.intensity = 8;
+    setTimeout(() => { _burstLight.intensity = 0; }, 2000);
 
     window.dispatchEvent(new CustomEvent('puzzle2Solved'));
     console.log('✅ Puzzle 2 solved!');
