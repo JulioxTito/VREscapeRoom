@@ -11,7 +11,8 @@
 </head>
 
 <body>
-    <audio id="bgMusic" src="Assets/audio/tomb_music.mp3" loop></audio>
+    <audio id="bladeSound" src="Assets/audio/blade.mp3"></audio>
+    <audio id="screamSound" src="Assets/audio/scream.mp3"></audio>
 
     <script type="importmap">
         {
@@ -161,6 +162,7 @@ import { initPuzzle2, puzzle2TryGrab, puzzle2TryRelease, puzzle2UpdateHover, puz
         let leverArm = null;
         let leverActive = false;
         let leverPulled = false;
+        let gameOverTriggered = false;
         const leverObjects = [];
 
         // Torch model
