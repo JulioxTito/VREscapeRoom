@@ -163,6 +163,7 @@ import { initPuzzle2, puzzle2TryGrab, puzzle2TryRelease, puzzle2UpdateHover, puz
         let leverActive = false;
         let leverPulled = false;
         let gameOverTriggered = false;
+        let scarabGrabbed = false;
         const leverObjects = [];
 
         // Torch model
@@ -307,6 +308,7 @@ import { initPuzzle2, puzzle2TryGrab, puzzle2TryRelease, puzzle2UpdateHover, puz
                     if (!o) continue;
                     if (o.userData.type === 'scarabBall') {
                         timerPaused = false;
+                        scarabGrabbed = true;
                         scene.remove(o);
                         grabbableObjects.splice(grabbableObjects.indexOf(o), 1);
                         console.log('Timer started!');
@@ -425,12 +427,12 @@ import { initPuzzle2, puzzle2TryGrab, puzzle2TryRelease, puzzle2UpdateHover, puz
 function buildScarabPedestal() {
             var pedMat = new THREE.MeshStandardMaterial({ color: 0x8B6914, roughness: 0.8 });
             var ped = new THREE.Mesh(new THREE.BoxGeometry(0.3, 1.0, 0.3), pedMat);
-            ped.position.set(0, 0.5, -13);
+            ped.position.set(0, 0.5, -8);
             scene.add(ped);
 
             var plateMat = new THREE.MeshStandardMaterial({ color: 0xFFD700, metalness: 0.9, roughness: 0.2 });
             var plate = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.05, 0.4), plateMat);
-            plate.position.set(0, 1.05, -13);
+            plate.position.set(0, 1.05, -8);
             scene.add(plate);
 
             var ballMat = new THREE.MeshStandardMaterial({
@@ -438,14 +440,14 @@ function buildScarabPedestal() {
                 emissive: new THREE.Color(0xFFAA00), emissiveIntensity: 0.5,
             });
             var ball = new THREE.Mesh(new THREE.SphereGeometry(0.12, 16, 12), ballMat);
-            ball.position.set(0, 1.25, -13);
+           ball.position.set(0, 1.25, -8);
             ball.name = 'scarabBall';
             ball.userData.type = 'scarabBall';
             scene.add(ball);
             grabbableObjects.push(ball);
 
             var glow = new THREE.PointLight(0xFFD700, 2, 3);
-            glow.position.set(0, 1.8, -13);
+            glow.position.set(0, 1.8, -8);
             scene.add(glow);
         }
 
@@ -1933,6 +1935,20 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
                 }
             }
 
+            // Scarab ball grab
+            var scarab = scene.getObjectByName('scarabBall');
+            if (scarab) {
+                var hits = raycaster.intersectObject(scarab);
+                if (hits.length > 0) {
+                    timerPaused = false;
+                    scarabGrabbed = true;
+                    scene.remove(scarab);
+                    grabbableObjects.splice(grabbableObjects.indexOf(scarab), 1);
+                    console.log('Timer started!');
+                    return;
+                }
+            }
+
             // ── Fallback to puzzle1's grab logic ──
             if (puzzle1TryGrab(controller, raycaster)) return;
 if (!station1Solved) { if (puzzle2TryGrab(controller, raycaster)) { showLockMessage('Complete the Tablet first!'); } }
@@ -2134,10 +2150,7 @@ else if (puzzle2TryGrab(controller, raycaster)) return;
             };
            
             // Also start on first VR controller interaction
-            if (controller1) controller1.addEventListener('selectstart', startTimerOnce);
-            if (controller2) controller2.addEventListener('selectstart', startTimerOnce);
-            // And start on real WebXR session begin
-            renderer.xr.addEventListener('sessionstart', startTimerOnce);
+            
 
             // Stash references so animate() can update them
             timerTextPanel = {
