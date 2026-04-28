@@ -230,6 +230,7 @@ import { initPuzzle2, puzzle2TryGrab, puzzle2TryRelease, puzzle2UpdateHover, puz
             // Hemisphere: warm firelight from below bouncing off stone floor, cool dark above
             const hemi = new THREE.HemisphereLight(0x7A3208, 0x080200, 1.4);
             scene.add(hemi);
+            buildScarabPedestal();
             buildCorridor();
             buildTombRoom();
             buildStation1();
@@ -410,6 +411,40 @@ import { initPuzzle2, puzzle2TryGrab, puzzle2TryRelease, puzzle2UpdateHover, puz
             // Stop the timer
             timeRemaining = 0;
             console.log('🏆 YOU ESCAPED!');
+        }
+
+        function buildScarabPedestal() {
+            const bugLoader = new GLTFLoader();
+            bugLoader.load('Assets/Models/Pedestal/bug.glb', function(gltf) {
+                const bug = gltf.scene;
+                bug.position.set(0, 0, -6);
+                bug.scale.setScalar(1);
+                bug.traverse(function(c) {
+                    if (c.isMesh) {
+                        c.castShadow = true;
+                        c.frustumCulled = false;
+                    }
+                });
+                scene.add(bug);
+                console.log('🪲 Bug loaded!');
+            }, undefined, function(err) {
+                console.error('Bug load error:', err);
+            });
+
+            var ballMat = new THREE.MeshStandardMaterial({
+                color: 0xFFD700, metalness: 0.95, roughness: 0.1,
+                emissive: new THREE.Color(0xFFAA00), emissiveIntensity: 0.6,
+            });
+            var ball = new THREE.Mesh(new THREE.SphereGeometry(0.12, 16, 12), ballMat);
+            ball.position.set(0, 1.25, -6);
+            ball.name = 'scarabBall';
+            ball.userData.type = 'scarabBall';
+            scene.add(ball);
+            grabbableObjects.push(ball);
+
+            var glow = new THREE.PointLight(0xFFD700, 2, 3);
+            glow.position.set(0, 1.8, -6);
+            scene.add(glow);
         }
 
         function buildCorridor() {
