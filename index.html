@@ -900,7 +900,7 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
             scene.userData.keyInserted = false;
 
             // Label so the player knows what it is
-            makeTextPanel('Insert Key Here', 4.2, 1.65, -12, 0.7, 0.18);
+            makeTextPanel('Insert Key Here', 4.2, 1.65, -12, 0.7, 0.18).rotation.y = -Math.PI / 2; // we can rotate y axis with 
         }
 
         // ── PUZZLE 3 CEILING SYMBOLS — place 4 suns, 2 scarabs, 7 ankhs on ceiling ──
