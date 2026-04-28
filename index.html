@@ -303,6 +303,13 @@ import { initPuzzle2, puzzle2TryGrab, puzzle2TryRelease, puzzle2UpdateHover, puz
                     let o = h.object;
                     while (o && !o.userData.type) o = o.parent;
                     if (!o) continue;
+                    if (o.userData.type === 'scarabBall') {
+                        timerPaused = false;
+                        scene.remove(o);
+                        grabbableObjects.splice(grabbableObjects.indexOf(o), 1);
+                        console.log('⏱ Timer started!');
+                        return;
+                    }
                     if (o.userData.type === 'lever') {
                         scene.userData.leverPulled = true;
                         scene.userData.leverT = 0;
@@ -413,34 +420,24 @@ import { initPuzzle2, puzzle2TryGrab, puzzle2TryRelease, puzzle2UpdateHover, puz
             console.log('🏆 YOU ESCAPED!');
         }
 
-        function buildScarabPedestal() {
+       function buildScarabPedestal() {
             const bugLoader = new GLTFLoader();
             bugLoader.load('Assets/Models/Pedestal/bug.glb', function(gltf) {
                 const bug = gltf.scene;
-                bug.position.set(0, 0, -6);
-                bug.scale.setScalar(0.3);
+                bug.position.set(0, 1.5, -6);
+                bug.rotation.y = Math.PI;
+                bug.scale.setScalar(0.2);
+                bug.name = 'scarabBall';
+                bug.userData.type = 'scarabBall';
                 bug.traverse(function(c) {
-                    if (c.isMesh) {
-                        c.castShadow = true;
-                        c.frustumCulled = false;
-                    }
+                    if (c.isMesh) { c.castShadow = true; c.frustumCulled = false; }
                 });
                 scene.add(bug);
-                console.log('🪲 Bug loaded!');
+                grabbableObjects.push(bug);
+                console.log('🪲 Bug loaded and grabbable!');
             }, undefined, function(err) {
                 console.error('Bug load error:', err);
             });
-
-            var ballMat = new THREE.MeshStandardMaterial({
-                color: 0xFFD700, metalness: 0.95, roughness: 0.1,
-                emissive: new THREE.Color(0xFFAA00), emissiveIntensity: 0.6,
-            });
-            var ball = new THREE.Mesh(new THREE.SphereGeometry(0.12, 16, 12), ballMat);
-            ball.position.set(0, 1.25, -6);
-            ball.name = 'scarabBall';
-            ball.userData.type = 'scarabBall';
-            scene.add(ball);
-            grabbableObjects.push(ball);
 
             var glow = new THREE.PointLight(0xFFD700, 2, 3);
             glow.position.set(0, 1.8, -6);
@@ -1895,7 +1892,13 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
                 if (!target) continue;
                 const t = target.userData.type;
                 console.log('VR select - target type:', t);
-
+if (t === 'scarabBall') {
+                    timerPaused = false;
+                    scene.remove(target);
+                    grabbableObjects.splice(grabbableObjects.indexOf(target), 1);
+                    console.log('⏱ Timer started!');
+                    return;
+                }
                 if (t === 'lever') {
                     scene.userData.leverPulled = true;
                     scene.userData.leverT = 0;
