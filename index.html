@@ -310,7 +310,8 @@ import { initPuzzle2, puzzle2TryGrab, puzzle2TryRelease, puzzle2UpdateHover, puz
                         scene.remove(o);
                         grabbableObjects.splice(grabbableObjects.indexOf(o), 1);
                         console.log('⏱ Timer started!');
-                        setTimeout(function() { triggerGameOver(); }, DEATH_DELAY_MS);
+                        setTimeout(function() { lightsOut(); }, DEATH_DELAY_MS);
+                    setTimeout(function() { triggerGameOver(); }, DEATH_DELAY_MS + 2000);
                         return;
                     }
                     if (o.userData.type === 'lever') {
@@ -2250,6 +2251,20 @@ function showLockMessage(msg) {
             sign.appendChild(sub);
             document.body.appendChild(sign);
         }
+function lightsOut() {
+            var blackout = document.createElement('div');
+            blackout.id = 'blackout';
+            blackout.style.position = 'fixed';
+            blackout.style.top = '0';
+            blackout.style.left = '0';
+            blackout.style.right = '0';
+            blackout.style.bottom = '0';
+            blackout.style.background = 'black';
+            blackout.style.zIndex = '1000';
+            blackout.style.pointerEvents = 'none';
+            document.body.appendChild(blackout);
+        }
+
         function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
