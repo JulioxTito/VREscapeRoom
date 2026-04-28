@@ -174,7 +174,7 @@ import { initPuzzle2, puzzle2TryGrab, puzzle2TryRelease, puzzle2UpdateHover, puz
         // Hourglass & Timer State
         let hourglassGroup; // This will be attached to the camera
         let hourglassSandTop, hourglassSandBottom;
-        let timeRemaining = 240; // 10 minutes
+        let timeRemaining = 5; // 10 minutes
         let timerPaused = true;  // start paused — user clicks play to begin
         let lastTimestamp = 0;
         let timerTextPanel = null;
@@ -2133,13 +2133,7 @@ else if (puzzle2TryGrab(controller, raycaster)) return;
                     console.log('▶ Timer started!');
                 }
             };
-            renderer.domElement.addEventListener('click', startTimerOnce, { once: false });
-            window.addEventListener('keydown', startTimerOnce, { once: false });
-            // Also start on first VR controller interaction
-            if (controller1) controller1.addEventListener('selectstart', startTimerOnce);
-            if (controller2) controller2.addEventListener('selectstart', startTimerOnce);
-            // And start on real WebXR session begin
-            renderer.xr.addEventListener('sessionstart', startTimerOnce);
+           
 
             // Stash references so animate() can update them
             timerTextPanel = {
@@ -2218,6 +2212,38 @@ function showLockMessage(msg) {
             clearTimeout(el._t);
             el._t = setTimeout(() => el.style.opacity = '0', 2000);
         }
+        function triggerGameOver() {
+            var sign = document.createElement('div');
+            sign.style.position = 'fixed';
+            sign.style.top = '0';
+            sign.style.left = '0';
+            sign.style.right = '0';
+            sign.style.bottom = '0';
+            sign.style.zIndex = '2000';
+          sign.style.display = 'flex';
+            sign.style.flexDirection = 'column';
+            sign.style.alignItems = 'center';
+            sign.style.justifyContent = 'center';
+            sign.style.background = 'rgba(0,0,0,0.85)';
+            sign.style.pointerEvents = 'none';
+            var inner = document.createElement('div');
+            inner.style.textAlign = 'center';
+            inner.style.color = '#FF0000';
+            inner.style.fontFamily = 'Times New Roman, serif';
+            inner.style.fontSize = '100px';
+            inner.style.fontWeight = 'bold';
+            inner.style.letterSpacing = '8px';
+            inner.textContent = 'YOU DIED';
+            var sub = document.createElement('div');
+            sub.style.color = '#FF6060';
+            sub.style.fontFamily = 'serif';
+            sub.style.fontSize = '28px';
+            sub.style.marginTop = '20px';
+            sub.textContent = 'The Pharaoh\'s curse claims another soul';
+            sign.appendChild(inner);
+            sign.appendChild(sub);
+            document.body.appendChild(sign);
+        }
         function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
@@ -2253,7 +2279,7 @@ function showLockMessage(msg) {
             // Only count down when timer is unpaused
             if (timeRemaining > 0 && !timerPaused) {
                 timeRemaining = Math.max(0, timeRemaining - dt);
-                const progress = Math.max(0, timeRemaining / 240);
+                const progress = Math.max(0, timeRemaining / 5);
 
                 if (timerTextPanel && timerTextPanel.isHTML) {
                     const mins = Math.floor(timeRemaining / 60);
@@ -2295,12 +2321,13 @@ function showLockMessage(msg) {
                         }
                         timerTextPanel.userData.lastTime = timeString;
                     }
-                }
-            } else if (timerTextPanel && timerTextPanel.isHTML && timerTextPanel.userData.lastTime !== '0:00') {
+                }} else if (timerTextPanel && timerTextPanel.isHTML && timerTextPanel.userData.lastTime !== '0:00' && timeRemaining <= 0) {
+            
                 timerTextPanel.valueEl.textContent = '0:00';
                 timerTextPanel.valueEl.style.color = '#ff4040';
                 timerTextPanel.fillEl.style.width = '0%';
-                timerTextPanel.userData.lastTime = '0:00';
+               timerTextPanel.userData.lastTime = '0:00';
+                triggerGameOver();
             }
 
             // 5. --- DOOR COLLISION & ANIMATION ---
