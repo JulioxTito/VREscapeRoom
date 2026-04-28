@@ -417,7 +417,7 @@ import { initPuzzle2, puzzle2TryGrab, puzzle2TryRelease, puzzle2UpdateHover, puz
             const bugLoader = new GLTFLoader();
             bugLoader.load('Assets/Models/Pedestal/bug.glb', function(gltf) {
                 const bug = gltf.scene;
-                bug.position.set(0, 1, -6);
+                bug.position.set(0, 0, -6);
                 bug.scale.setScalar(0.3);
                 bug.traverse(function(c) {
                     if (c.isMesh) {
