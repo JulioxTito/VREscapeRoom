@@ -5,6 +5,7 @@
 // - Detailed hand-drawn Egyptian symbols (sun-with-rays, scarab, ankh) on plates above each dial
 // - Gold lock plate + keyhole in centre
 // - Animated lid open + key float when unlocked
+//works
 
 import * as THREE from 'three';
 
