@@ -308,6 +308,7 @@ import { initPuzzle2, puzzle2TryGrab, puzzle2TryRelease, puzzle2UpdateHover, puz
                         scene.remove(o);
                         grabbableObjects.splice(grabbableObjects.indexOf(o), 1);
                         console.log('⏱ Timer started!');
+                        setTimeout(function() { triggerGameOver(); }, 5000);
                         return;
                     }
                     if (o.userData.type === 'lever') {
@@ -1897,6 +1898,7 @@ if (t === 'scarabBall') {
                     scene.remove(target);
                     grabbableObjects.splice(grabbableObjects.indexOf(target), 1);
                     console.log('⏱ Timer started!');
+                    setTimeout(function() { triggerGameOver(); }, 5000); // 5 seconds after grab
                     return;
                 }
                 if (t === 'lever') {
@@ -2321,7 +2323,7 @@ function showLockMessage(msg) {
                         }
                         timerTextPanel.userData.lastTime = timeString;
                     }
-                }} else if (timerTextPanel && timerTextPanel.isHTML && timerTextPanel.userData.lastTime !== '0:00' && timeRemaining <= 0) {
+               }} else if (timerTextPanel && timerTextPanel.isHTML && timerTextPanel.userData.lastTime !== '0:00' && timeRemaining <= 0) {
             
                 timerTextPanel.valueEl.textContent = '0:00';
                 timerTextPanel.valueEl.style.color = '#ff4040';
