@@ -30,7 +30,7 @@
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
         import { initPuzzle1, puzzle1TryGrab, puzzle1TryRelease, puzzle1UpdateHover } from './puzzle1.js';
         import { initTreasureChest } from './puzzle3.js';
-
+import { initPuzzle2, puzzle2TryGrab, puzzle2TryRelease, puzzle2UpdateHover, puzzle2UpdateBeam, puzzle2RegisterRefs } from './puzzle2.js';
         // -------------------------------------------------------------------
         // GLOBALS
         // -------------------------------------------------------------------
@@ -226,6 +226,7 @@
             buildWallPaintings();
             buildEgyptExit();
             initPuzzle1(scene, camera, renderer);
+            initPuzzle2(scene, camera, renderer);
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
@@ -823,6 +824,7 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
             s2Light.name = 'station2Light';
             s2Light.position.set(-6, 3.5, -22);
             scene.add(s2Light);
+            puzzle2RegisterRefs(scaleBeamMesh, scalePanLeft, scalePanRight);
         }
 
         function buildStation3() {
@@ -1890,7 +1892,7 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
 
             // ── Fallback to puzzle1's grab logic ──
             if (puzzle1TryGrab(controller, raycaster)) return;
-
+if (puzzle2TryGrab(controller, raycaster)) return;
             // ── Default: just attach whatever was hit ──
             if (priorityHits.length > 0) {
                 const object = priorityHits[0].object;
@@ -1912,6 +1914,7 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
             const controller = event.target;
             const obj = controller.userData.selected;
             if (puzzle1TryRelease(controller)) return;
+            if (puzzle2TryRelease(controller)) return;
             if (!obj) return;
 
             // ── KEEP the chest key on the controller — it should not drop when trigger released ──
@@ -2345,6 +2348,8 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
 
             // 6. --- PUZZLE UPDATES & RENDER ---
             puzzle1UpdateHover([controller1, controller2], raycaster);
+            puzzle2UpdateHover([controller1, controller2], raycaster);
+            puzzle2UpdateBeam();
             renderer.render(scene, camera);
         }
 
