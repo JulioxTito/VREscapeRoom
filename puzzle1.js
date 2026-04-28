@@ -3,6 +3,7 @@
 
 import * as THREE from 'three';
 
+let _burstLight = null;
 let _scene;
 const pieces = [];
 let piecesPlaced = 0;
@@ -48,6 +49,9 @@ export function initPuzzle1(scene, camera, renderer) {
     buildTabletOutline();
     loadAndBuildPieces();
     createProgressUI();
+    _burstLight = new THREE.PointLight(0xFFD700, 0, 10);
+    _burstLight.position.copy(TABLET_CENTER);
+    _scene.add(_burstLight);
 }
 
 // -------------------------------------------------------------------
@@ -317,10 +321,8 @@ function onPuzzleSolved() {
         <span style="font-size:22px;">✨ Tablet Restored! ✨</span><br>
         <span style="font-size:14px; color:#FFA500;">The next chamber awakens...</span>
     `;
-    const burst = new THREE.PointLight(0xFFD700, 8, 10);
-    burst.position.copy(TABLET_CENTER);
-    _scene.add(burst);
-    setTimeout(() => _scene.remove(burst), 2000);
+    _burstLight.intensity = 8;
+    setTimeout(() => { _burstLight.intensity = 0; }, 2000);
     console.log('Puzzle 1 solved!');
     window.dispatchEvent(new CustomEvent('puzzle1Solved'));
 }
