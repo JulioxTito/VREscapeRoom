@@ -13,6 +13,7 @@
 <body>
     <audio id="bgMusic" src="Assets/audio/tomb_music.mp3" loop></audio>
     <audio id="screamSound" src="Assets/audio/scream_man.mp3"></audio>
+    <audio id="bladesSound" src="Assets/audio/blades.mp3"></audio>
 
     <script type="importmap">
         {
@@ -175,8 +176,8 @@ import { initPuzzle2, puzzle2TryGrab, puzzle2TryRelease, puzzle2UpdateHover, puz
         // Hourglass & Timer State
         let hourglassGroup; // This will be attached to the camera
         let hourglassSandTop, hourglassSandBottom;
-        let timeRemaining = 5; // 10 minutes
-        const DEATH_DELAY_MS = 5000; // ← CHANGE THIS to adjust time before YOU DIED (in milliseconds)
+        let timeRemaining = 180; // 10 minutes
+        const DEATH_DELAY_MS = 180000; // ← CHANGE THIS to adjust time before YOU DIED (in milliseconds)
         let timerPaused = true;  // start paused — user clicks play to begin
         let lastTimestamp = 0;
         let timerTextPanel = null;
@@ -219,7 +220,7 @@ import { initPuzzle2, puzzle2TryGrab, puzzle2TryRelease, puzzle2UpdateHover, puz
             }
 
             cameraRig = new THREE.Group();
-            cameraRig.position.set(0, 0, -10); 
+            cameraRig.position.set(0, 0, 4); 
             scene.add(cameraRig);
 
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 80);
@@ -1901,7 +1902,8 @@ if (t === 'scarabBall') {
                     scene.remove(target);
                     grabbableObjects.splice(grabbableObjects.indexOf(target), 1);
                     console.log('⏱ Timer started!');
-                    setTimeout(function() { triggerGameOver(); }, 5000); // 5 seconds after grab
+                    setTimeout(function() { lightsOut(); }, DEATH_DELAY_MS);
+                    setTimeout(function() { triggerGameOver(); }, DEATH_DELAY_MS + 2000);
                     return;
                 }
                 if (t === 'lever') {
@@ -2218,8 +2220,12 @@ function showLockMessage(msg) {
             el._t = setTimeout(() => el.style.opacity = '0', 2000);
         }
         function triggerGameOver() {
-            var scream = document.getElementById('screamSound');
-            if (scream) scream.play().catch(function() {});
+            var blades = document.getElementById('bladesSound');
+            if (blades) blades.play().catch(function() {});
+            setTimeout(function() {
+                var scream = document.getElementById('screamSound');
+                if (scream) scream.play().catch(function() {});
+            }, 1000);
             var sign = document.createElement('div');
             sign.style.position = 'fixed';
             sign.style.top = '0';
@@ -2300,7 +2306,7 @@ function lightsOut() {
             // Only count down when timer is unpaused
             if (timeRemaining > 0 && !timerPaused) {
                 timeRemaining = Math.max(0, timeRemaining - dt);
-                const progress = Math.max(0, timeRemaining / 5);
+                const progress = Math.max(0, timeRemaining / 180);
 
                 if (timerTextPanel && timerTextPanel.isHTML) {
                     const mins = Math.floor(timeRemaining / 60);
