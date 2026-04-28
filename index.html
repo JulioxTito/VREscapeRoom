@@ -2371,7 +2371,25 @@ function showLockMessage(msg) {
                     showEscapedSign();
                 }
             }
-
+// ── LOCKED ZONE COLLISION ──
+            const px = cameraRig.position.x;
+            const pz = cameraRig.position.z;
+            if (!station1Solved) {
+                if (px < -2 && px > -10 && pz < -18 && pz > -26) {
+                    cameraRig.position.copy(cameraRig.userData.lastSafePos || new THREE.Vector3(0, 0, -10));
+                    showLockMessage('Complete the Tablet first!');
+                }
+            }
+            if (!station2Solved) {
+                if (px > 2 && px < 10 && pz < -18 && pz > -26) {
+                    cameraRig.position.copy(cameraRig.userData.lastSafePos || new THREE.Vector3(0, 0, -10));
+                    showLockMessage('Balance the Scales first!');
+                }
+            }
+            // Save last safe position every frame when not in a locked zone
+            const inLockedZone = (!station1Solved && px < -2 && px > -10 && pz < -18 && pz > -26) ||
+                                 (!station2Solved && px > 2 && px < 10 && pz < -18 && pz > -26);
+            if (!inLockedZone) cameraRig.userData.lastSafePos = cameraRig.position.clone();
             // 6. --- PUZZLE UPDATES & RENDER ---
             puzzle1UpdateHover([controller1, controller2], raycaster);
             puzzle2UpdateHover([controller1, controller2], raycaster);
