@@ -160,8 +160,10 @@ function snapPiece(piece) {
     }, 600);
 
     piecesPlaced++;
-    const el = document.getElementById('p1-progress');
-    if (el) el.textContent = `${piecesPlaced} / ${TOTAL_PIECES} pieces placed`;
+    if (_progressPanel) {
+        _drawProgress(_progressPanel.ctx, _progressPanel.canvas, piecesPlaced);
+        _progressPanel.tex.needsUpdate = true;
+    }
     if (piecesPlaced >= TOTAL_PIECES) onPuzzleSolved();
 }
 
@@ -320,26 +322,47 @@ function onPuzzleSolved() {
     _scene.add(burst);
     setTimeout(() => _scene.remove(burst), 2000);
     console.log('Puzzle 1 solved!');
+    window.dispatchEvent(new CustomEvent('puzzle1Solved'));
 }
 
 // -------------------------------------------------------------------
 // UI
 // -------------------------------------------------------------------
+let _progressPanel = null;
+
 function createProgressUI() {
-    let div = document.getElementById('p1-ui');
-    if (!div) {
-        div = document.createElement('div');
-        div.id = 'p1-ui';
-        div.style.cssText = `
-            position: fixed; top: 20px; left: 50%;
-            transform: translateX(-50%);
-            color: #FFD700; font-family: serif; font-size: 16px;
-            text-align: center; pointer-events: none;
-            text-shadow: 0 0 10px #FF6600;
-        `;
-        document.body.appendChild(div);
-    }
-    div.innerHTML = `Restore the sacred tablet...<br><span id="p1-progress">0 / ${TOTAL_PIECES} pieces placed</span>`;
+    // 3D panel above the tablet wall — visible in VR
+    const canvas = document.createElement('canvas');
+    canvas.width = 512; canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    _drawProgress(ctx, canvas, 0);
+    const tex = new THREE.CanvasTexture(canvas);
+    const mesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(1.2, 0.3),
+        new THREE.MeshStandardMaterial({ map: tex, transparent: true, emissive: new THREE.Color(0x000000) })
+    );
+    mesh.position.set(-7.5, 2.2, -14.8);
+    _scene.add(mesh);
+    _progressPanel = { mesh, tex, canvas, ctx };
+}
+
+function _drawProgress(ctx, canvas, count) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = 'rgba(30,15,0,0.85)';
+    ctx.roundRect(4, 4, canvas.width - 8, canvas.height - 8, 12);
+    ctx.fill();
+    ctx.strokeStyle = count >= 6 ? '#00FF88' : '#DAA520';
+    ctx.lineWidth = 4;
+    ctx.roundRect(4, 4, canvas.width - 8, canvas.height - 8, 12);
+    ctx.stroke();
+    ctx.fillStyle = count >= 6 ? '#00FF88' : '#FFD700';
+    ctx.font = 'bold 36px serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(
+        count >= 6 ? '✨ Tablet Restored! ✨' : `Pieces placed: ${count} / 6`,
+        canvas.width / 2, canvas.height / 2
+    );
 }
 
 // -------------------------------------------------------------------
