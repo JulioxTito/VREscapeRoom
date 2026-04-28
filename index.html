@@ -201,7 +201,7 @@ import { initPuzzle2, puzzle2TryGrab, puzzle2TryRelease, puzzle2UpdateHover, puz
             scene.background = new THREE.Color(0x0A0402); // changed to sky color when outside
             
             // Moderate fog — room stays visible but far end fades naturally
-            scene.fog = new THREE.FogExp2(0x0A0402, 0.018); // reduced — exterior needs visibility 
+            
 
             // Background music — starts on first user interaction (browsers block autoplay)
             const bgMusic = document.getElementById('bgMusic');
@@ -220,7 +220,7 @@ import { initPuzzle2, puzzle2TryGrab, puzzle2TryRelease, puzzle2UpdateHover, puz
             cameraRig.position.set(0, 0, -10); 
             scene.add(cameraRig);
 
-            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 500);
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 80);
             camera.position.set(0, 1.6, 0);
             cameraRig.add(camera);
 
@@ -1157,7 +1157,7 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
             };
 
             // 6. Station label
-            makeTextPanel('STATION 4\nTreasure Chest', 6, 2.6, -22, 0.9, 0.35);
+            makeTextPanel('STATION 3\nTreasure Chest', 6, 2.6, -22, 0.9, 0.35);
         }
 
         function spawnGlyphs() {
@@ -2338,7 +2338,7 @@ function showLockMessage(msg) {
             // === BACKGROUND: show Egypt sky once lever is pulled ===
             if (scene.userData.egyptStartZ !== undefined) {
                 if (scene.userData.leverPulled) {
-                    scene.fog = null;
+                    scene.fog = new THREE.FogExp2(0x4A9AE8, 0.002);
                     scene.background = scene.userData.egyptBg || new THREE.Color(0x4A9AE8);
                 } else {
                     if (!scene.fog) scene.fog = new THREE.FogExp2(0x0A0402, 0.018);
