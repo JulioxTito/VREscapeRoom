@@ -176,7 +176,7 @@ import { initPuzzle2, puzzle2TryGrab, puzzle2TryRelease, puzzle2UpdateHover, puz
         // Hourglass & Timer State
         let hourglassGroup; // This will be attached to the camera
         let hourglassSandTop, hourglassSandBottom;
-        let timeRemaining = 5; // 10 minutes
+        let timeRemaining = 240; // 10 minutes
         let timerPaused = true;  // start paused — user clicks play to begin
         let lastTimestamp = 0;
         let timerTextPanel = null;
@@ -232,7 +232,6 @@ import { initPuzzle2, puzzle2TryGrab, puzzle2TryRelease, puzzle2UpdateHover, puz
             // Hemisphere: warm firelight from below bouncing off stone floor, cool dark above
             const hemi = new THREE.HemisphereLight(0x7A3208, 0x080200, 1.4);
             scene.add(hemi);
-            buildScarabPedestal();
             buildCorridor();
             buildTombRoom();
             buildStation1();
@@ -305,13 +304,6 @@ import { initPuzzle2, puzzle2TryGrab, puzzle2TryRelease, puzzle2UpdateHover, puz
                     let o = h.object;
                     while (o && !o.userData.type) o = o.parent;
                     if (!o) continue;
-                    if (o.userData.type === 'scarabBall') {
-                        timerPaused = false;
-                        scene.remove(o);
-                        grabbableObjects.splice(grabbableObjects.indexOf(o), 1);
-                        console.log('Timer started!');
-                        return;
-                    }
                     if (o.userData.type === 'lever') {
                         scene.userData.leverPulled = true;
                         scene.userData.leverT = 0;
@@ -420,33 +412,6 @@ import { initPuzzle2, puzzle2TryGrab, puzzle2TryRelease, puzzle2UpdateHover, puz
             // Stop the timer
             timeRemaining = 0;
             console.log('🏆 YOU ESCAPED!');
-        }
-
-function buildScarabPedestal() {
-            var pedMat = new THREE.MeshStandardMaterial({ color: 0x8B6914, roughness: 0.8 });
-            var ped = new THREE.Mesh(new THREE.BoxGeometry(0.3, 1.0, 0.3), pedMat);
-            ped.position.set(0, 0.5, -13);
-            scene.add(ped);
-
-            var plateMat = new THREE.MeshStandardMaterial({ color: 0xFFD700, metalness: 0.9, roughness: 0.2 });
-            var plate = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.05, 0.4), plateMat);
-            plate.position.set(0, 1.05, -13);
-            scene.add(plate);
-
-            var ballMat = new THREE.MeshStandardMaterial({
-                color: 0xFFD700, metalness: 0.95, roughness: 0.1,
-                emissive: new THREE.Color(0xFFAA00), emissiveIntensity: 0.5,
-            });
-            var ball = new THREE.Mesh(new THREE.SphereGeometry(0.12, 16, 12), ballMat);
-            ball.position.set(0, 1.25, -13);
-            ball.name = 'scarabBall';
-            ball.userData.type = 'scarabBall';
-            scene.add(ball);
-            grabbableObjects.push(ball);
-
-            var glow = new THREE.PointLight(0xFFD700, 2, 3);
-            glow.position.set(0, 1.8, -13);
-            scene.add(glow);
         }
 
         function buildCorridor() {
@@ -2132,7 +2097,8 @@ else if (puzzle2TryGrab(controller, raycaster)) return;
                     console.log('▶ Timer started!');
                 }
             };
-           
+            renderer.domElement.addEventListener('click', startTimerOnce, { once: false });
+            window.addEventListener('keydown', startTimerOnce, { once: false });
             // Also start on first VR controller interaction
             if (controller1) controller1.addEventListener('selectstart', startTimerOnce);
             if (controller2) controller2.addEventListener('selectstart', startTimerOnce);
@@ -2251,7 +2217,7 @@ function showLockMessage(msg) {
             // Only count down when timer is unpaused
             if (timeRemaining > 0 && !timerPaused) {
                 timeRemaining = Math.max(0, timeRemaining - dt);
-                const progress = Math.max(0, timeRemaining / 5);
+                const progress = Math.max(0, timeRemaining / 240);
 
                 if (timerTextPanel && timerTextPanel.isHTML) {
                     const mins = Math.floor(timeRemaining / 60);
