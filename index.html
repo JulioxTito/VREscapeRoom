@@ -175,6 +175,7 @@ import { initPuzzle2, puzzle2TryGrab, puzzle2TryRelease, puzzle2UpdateHover, puz
         let hourglassGroup; // This will be attached to the camera
         let hourglassSandTop, hourglassSandBottom;
         let timeRemaining = 5; // 10 minutes
+        const DEATH_DELAY_MS = 5000; // ← CHANGE THIS to adjust time before YOU DIED (in milliseconds)
         let timerPaused = true;  // start paused — user clicks play to begin
         let lastTimestamp = 0;
         let timerTextPanel = null;
@@ -308,7 +309,7 @@ import { initPuzzle2, puzzle2TryGrab, puzzle2TryRelease, puzzle2UpdateHover, puz
                         scene.remove(o);
                         grabbableObjects.splice(grabbableObjects.indexOf(o), 1);
                         console.log('⏱ Timer started!');
-                        setTimeout(function() { triggerGameOver(); }, 5000);
+                        setTimeout(function() { triggerGameOver(); }, DEATH_DELAY_MS);
                         return;
                     }
                     if (o.userData.type === 'lever') {
