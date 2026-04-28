@@ -751,35 +751,11 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
 // station 1, edit
 
         function buildStation1() {
-    const tableMat = new THREE.MeshStandardMaterial({ color: 0x7A6A50, roughness: 0.7 });
-    const legMat   = new THREE.MeshStandardMaterial({ color: 0x6A5A40, roughness: 0.8 });
-
-    const tableTop = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.08, 0.7), tableMat);
-    tableTop.position.set(-6, 0.84, -12);
-    tableTop.receiveShadow = true;
-    scene.add(tableTop);
-
-    [[-0.5,-0.28],[-0.5,0.28],[0.5,-0.28],[0.5,0.28]].forEach(([x,z]) => {
-        const leg = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.84, 0.1), legMat);
-        leg.position.set(-6 + x, 0.42, -12 + z);
-        scene.add(leg);
-    });
+    
 
     makeTextPanel('STATION 1\nAssemble the scroll', -6, 1.8, -14, 0.8, 0.35);
 
-    const colors = [0xD4A96A, 0xC8985E, 0xDDB87A, 0xBF8A50];
-    colors.forEach((color, i) => {
-        const geo = new THREE.PlaneGeometry(0.26, 0.18);
-        const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.9, side: THREE.DoubleSide });
-        const piece = new THREE.Mesh(geo, mat);
-        piece.position.set(-6 + (Math.random() - 0.5) * 0.8, 0.90, -12 + (Math.random() - 0.5) * 0.4);
-        piece.rotation.x = -Math.PI / 2;
-        piece.name = `piece_${i}`;
-        piece.userData.type = 'scrollPiece';
-        scene.add(piece);
-        scrollPieces.push(piece);
-        grabbableObjects.push(piece);
-    });
+    
 }
         function buildStation2() {
             const pedMat = new THREE.MeshStandardMaterial({ color: 0x7A6A50, roughness: 0.7 });
@@ -805,18 +781,7 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
             scalePanRight.position.set(-5.58, 1.38, -22);
             scene.add(scalePanRight);
 
-            const weights = [{ name: 'ankh', mass: 1.0 }, { name: 'feather', mass: 0.3 }, { name: 'jar', mass: 2.0 }];
-            weights.forEach((w, i) => {
-                const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), new THREE.MeshStandardMaterial({color: 0xffffff}));
-                mesh.position.set(-5.3, 0.95, -21 + i * 0.3);
-                mesh.userData.type = 'weight';
-                mesh.userData.mass = w.mass;
-                mesh.name = w.name;
-                mesh.castShadow = true;
-                scene.add(mesh);
-                scaleObjects.push(mesh);
-                grabbableObjects.push(mesh);
-            });
+          
 
             makeTextPanel('STATION 2\nBalance the scales', -6, 2.2, -22, 0.9, 0.35);
 
