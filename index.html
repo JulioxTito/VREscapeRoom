@@ -40,7 +40,7 @@ import { initPuzzle2, puzzle2TryGrab, puzzle2TryRelease, puzzle2UpdateHover, puz
         let controller1, controller2;
         let controllerGrip1, controllerGrip2;
         let cameraRig;
-        const moveSpeed = 2.0;
+        const moveSpeed = 1;
         const snapAngle = Math.PI / 4;
         let canSnapLeft = true;
         let canSnapRight = true;
@@ -774,16 +774,7 @@ loader.load('Assets/Models/sarcophagus3.glb', (gltf) => {
     console.log('Sarcophagus placed at (0, ' + sarcOffsetY.toFixed(2) + ', -19)');
 }, undefined, err => console.error('❌ Sarcophagus load error:', err));
 
-// --- PHARAOH (with test-cube fallback so something always shows) ---
-// First place bright test markers at the intended positions so user can see EXACTLY where they should go
-const pharaohMarkerMat = new THREE.MeshBasicMaterial({ color: 0xFFD700 });
-const markerL = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.8, 0.8), pharaohMarkerMat);
-markerL.position.set(-1.8, 0.9, -10.5);
-scene.add(markerL);
-const markerR = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.8, 0.8), pharaohMarkerMat);
-markerR.position.set(1.8, 0.9, -10.5);
-scene.add(markerR);
-console.log('Placed gold marker cubes at cat pharaoh positions');
+
 
 loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
     console.log('Cat pharaoh GLTF loaded!');
