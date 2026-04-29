@@ -778,10 +778,10 @@ loader.load('Assets/Models/sarcophagus3.glb', (gltf) => {
 // First place bright test markers at the intended positions so user can see EXACTLY where they should go
 const pharaohMarkerMat = new THREE.MeshBasicMaterial({ color: 0xFFD700 });
 const markerL = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.8, 0.8), pharaohMarkerMat);
-markerL.position.set(-0.8, 0.9, -10.5);
+markerL.position.set(-1.8, 0.9, -10.5);
 scene.add(markerL);
 const markerR = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.8, 0.8), pharaohMarkerMat);
-markerR.position.set(0.8, 0.9, -10.5);
+markerR.position.set(1.8, 0.9, -10.5);
 scene.add(markerR);
 console.log('Placed gold marker cubes at cat pharaoh positions');
 
@@ -799,9 +799,11 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
         console.error('Cat pharaoh has zero height! Using markers only.');
         return;
     }
+
     const targetHeight = 1.8;
     const scaleFactor = targetHeight / size.y;
     catModel.scale.setScalar(0.01 * scaleFactor);
+
     const box2 = new THREE.Box3().setFromObject(catModel);
     const offsetY = -box2.min.y;
     console.log('Cat pharaoh offsetY:', offsetY);
@@ -818,6 +820,10 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
     catModel.traverse(child => {
         if (child.isMesh) {
             // MeshBasicMaterial = always fully visible, no lighting required
+            child.material = new THREE.MeshBasicMaterial({
+                color: 0xFFD700,
+                side: THREE.DoubleSide
+            });
             child.visible = true;
             child.frustumCulled = false;
             child.renderOrder = 10; // render AFTER everything else so nothing occludes it
@@ -829,13 +835,13 @@ loader.load('Assets/Models/cat_pharaoh_king/scene.gltf', (gltf) => {
     scene.remove(markerR);
 
     const catL = catModel.clone();
-    catL.position.set(-0.8, offsetY, -10.5);
-    catL.rotation.y = Math.PI/2 ;
+    catL.position.set(-1.8, offsetY, -10.5);
+    catL.rotation.y = Math.PI ;
     scene.add(catL);
 
     const catR = catModel.clone();
-    catR.position.set(0.8, offsetY, -10.5);
-    catR.rotation.y = -Math.PI/2;
+    catR.position.set(1.8, offsetY, -10.5);
+    catR.rotation.y = -Math.PI;
     scene.add(catR);
     console.log('Cat pharaohs placed successfully.');
 }, undefined, err => console.error('Pharaoh LOAD ERROR:', err));
