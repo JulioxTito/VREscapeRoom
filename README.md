@@ -215,4 +215,4 @@ This project was built as a class assignment for a Virtual Reality course. Code 
 
 ---
 
-*"Can The Pharaoh's Tomb be conquered?"* ⌛
+*"Can The Pharaoh's Tomb be conquered ?"* ⌛
