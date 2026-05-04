@@ -209,10 +209,9 @@ This project was built as a class assignment for a Virtual Reality course. Code 
 ---
 
 ## 👥 Authors
-Julio Tito
-Cinchan Harikrishna
 
-**[Your Name(s) Here]** — VR Course, April 2026
+
+**[Julio Tito and Cinchan Harikrishna]** — VR Course, April 2026
 
 ---
 
