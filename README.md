@@ -10,11 +10,11 @@ The player has **10 minutes** to solve three connected puzzles and escape into t
 
 You wake up trapped inside a sealed Egyptian tomb. The corridor door is locked, and a 10-minute hourglass is counting down. To escape, you must:
 
-1. **Count the symbols** painted on the ceiling
-2. **Unlock the treasure chest** by entering the correct combination on its dials
-3. **Grab the gold key** that rises from the chest
+1. **Grab the golden scrab and enter the room 
+2. **Solve three different puzzles one by one 
+3. **Grab the gold key** from the last station
 4. **Insert the key** into the keyhole stand near the lever
-5. **Pull the lever** to open the main exit door
+5. Pull the lever** to open the main exit door
 6. **Walk out into the desert** before time runs out
 
 ---
@@ -64,7 +64,7 @@ VREscapeRoom/
 3. **Right-click `index.html`** → select **"Open with Live Server"**
 4. Live Server opens the page in your browser at `http://127.0.0.1:5500/index.html`
 5. **Click anywhere on the canvas** (or press a movement key) to start the timer
-6. The hourglass in the top-right corner begins counting down from `10:00`
+6. The hourglass in the top-right corner begins counting down from `3:00` when the golden scrab is grabbed 
 
 > ⚠️ **Important:** The project must be served over HTTP, not opened directly from the filesystem. ES modules and WebXR both require a real server context.
 
@@ -100,49 +100,6 @@ Install the **WebXR API Emulator** Chrome extension:
 3. Open your page — you'll see two virtual controller panels at the bottom
 4. Click **"Click to activate play mode"** at the top
 5. Click **"Press"** next to the **L Trigger** or **R Trigger** rows to fire each controller's trigger
-
----
-
-## 🧩 Full Puzzle Walkthrough
-
-### Step 1: Count the ceiling symbols
-
-Walk into the tomb. **Look UP** by dragging the mouse upward. Count each type of Egyptian symbol painted on the ceiling:
-
-- ☀ **Suns:** 4
-- 🪲 **Scarabs:** 2
-- ☥ **Ankhs:** 3
-
-(That's the secret code: **4-2-3**)
-
-### Step 2: Open the treasure chest
-
-Walk to the **back-right corner** of the tomb (Station 4). The chest sits on a stone table with three numeric dials (each one has a symbol panel above it).
-
-- Click the **leftmost dial** (Sun) **4** times → it shows `4`
-- Click the **middle dial** (Scarab) **2** times → it shows `2`
-- Click the **rightmost dial** (Ankh) **3** times → it shows `3`
-
-The plaque on the table front updates live: `Sun: 4 · Scarab: 2 · Ankh: 3`. When all three match, the plaque turns green: **★ UNLOCKED — GRAB THE KEY ★**.
-
-### Step 3: Grab the floating gold key
-
-The chest's lid swings open and a gold key rises out, spinning slowly above the chest. **Click it** (or aim a VR controller at it and pull the trigger). The key sticks to your camera/controller and follows you wherever you walk.
-
-### Step 4: Insert the key into the keyhole stand
-
-Walk back toward Station 3. Look for the **gold-plated sandstone stand** with a pulsing red light, labeled **"Insert Key Here"**. Walk close to it — when the held key gets within 0.4 m of the keyhole, it **automatically inserts**:
-
-- The light turns from red to green
-- The lever rises smoothly out of the floor over ~3 seconds
-
-### Step 5: Pull the lever
-
-Now that the lever is visible, click it (or aim and trigger). The lever swings down, the indicator turns green, and the giant portcullis door at the end of the corridor **slides upward** with a stone-grinding animation. The bright desert sky becomes visible.
-
-### Step 6: Escape!
-
-Walk down the corridor and through the now-open doorway. As soon as you cross the threshold, a full-screen **"YOU ESCAPED!"** banner appears with a glowing animation, accompanied by *"★ The Pharaoh's Tomb is conquered ★"*. The timer stops automatically.
 
 ---
 
@@ -212,16 +169,6 @@ These shortcuts are intended for development and grading. To do a full normal pl
 
 ---
 
-## ⚙️ Known Limitations
-
-- No audio feedback for individual puzzle events (no dial-click sound, lever creak, etc.)
-- The chest combination is hardcoded — same code on every replay
-- No save state — closing the tab restarts from the beginning
-- Asset loading is eager (no LOD or lazy-loading), which can cause frame-rate drops on low-end VR headsets
-- The custom Blender sarcophagus is intentionally simple (no painted hieroglyphs, no crook/flail)
-
----
-
 ## 🔮 Future Improvements
 
 - Add positional 3D audio (footsteps, dial clicks, lever creak, door rumble, ambient torches)
@@ -262,6 +209,8 @@ This project was built as a class assignment for a Virtual Reality course. Code 
 ---
 
 ## 👥 Authors
+Julio Tito
+Cinchan Harikrishna
 
 **[Your Name(s) Here]** — VR Course, April 2026
 
